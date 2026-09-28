@@ -1,5 +1,6 @@
 """The loop: observe → Jev decides → (text model for TYPE_TEXT) → humanized act → repeat."""
 
+import inspect
 import time
 
 from .browser import StalePage
@@ -69,8 +70,8 @@ async def run(session, goal, url=None, page=None, on_step=None):
         new_state = await session.observe(page, after=action)
         history[-1]["page_changed"] = new_state["marker"] != state["marker"]
         state = new_state
-        if on_step:
-            on_step(history[-1])
+        if on_step and inspect.isawaitable(reported := on_step(history[-1])):
+            await reported
         last = history[-3:]
         if len(last) == 3 and all(not h["page_changed"] and h["kind"] != "wait" for h in last):
             status, detail = "blocked", "Three actions in a row did not change the page."
