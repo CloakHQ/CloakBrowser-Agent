@@ -112,7 +112,7 @@ class Session:
         current = await self._eval(page, SNAPSHOT_JS)
         same = bool(current) and current["marker"] == state["marker"]
         if current and not same:
-            self.last_diff = _marker_diff(state["marker"], current["marker"])  # DEBUG: why was it stale
+            self.last_diff = _marker_diff(state["marker"], current["marker"])  # reported in the stale list
         return same
 
     async def act(self, page, state, action, text=None):
@@ -175,7 +175,7 @@ MARKER_PARTS = ["timeOrigin", "url", "scrollX", "scrollY", "innerWidth", "innerH
 
 
 def _marker_diff(old, new):
-    """DEBUG: name the marker parts that changed, with a short sample of the change."""
+    """Name the marker parts that changed, with a short sample, so stale retries explain themselves."""
     old, new = json.loads(old), json.loads(new)
     out = []
     for name, a, b in zip(MARKER_PARTS, old, new):

@@ -73,6 +73,20 @@ def test_field_text_null_means_needs_input_and_junk_is_rejected(monkeypatch):
             asyncio.run(model.field_text(CTX))
 
 
+def test_mcp_format_shows_probabilities_alternatives_and_stale():
+    from cloak_agent.mcp_server import _format
+    result = {
+        "status": "done", "detail": None, "url": "https://x", "title": "T", "actions": 1, "jev_calls": 2,
+        "elapsed_ms": 10, "markdown": "md", "stale": ["120ms click 'A': moved []"],
+        "trace": [{"step": 1, "kind": "click", "action": "CloakHQ/CloakBrowser", "text": None,
+                   "probability": 0.94, "alternatives": [("GitHub Projects on X", 0.05)]}],
+    }
+    out = _format("t1", result)
+    assert "1. click 'CloakHQ/CloakBrowser'  p=0.94 ['GitHub Projects on X' p=0.05]" in out
+    assert "stale retries" in out and "moved" in out
+    assert out.index("</untrusted_page_content>") > out.index("md")
+
+
 def test_resolve_redirects_decodes_clear_text_google_links_without_network():
     md = "### [A](https://www.google.com/url?q=https://a.example/x&sa=U) and [B](https://b.example/)"
     out = asyncio.run(model.resolve_redirects(md))

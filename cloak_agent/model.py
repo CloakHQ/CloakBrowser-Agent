@@ -132,11 +132,12 @@ async def choose(page, goal, history):
     result = await post_json(TYPESAFE_URL, os.environ["TYPESAFE_API_KEY"], body)
     operation_answer = validate_choice(result["answers"].get("operation", {}), operations)
     operation = operation_answer["choice"]
-    target = None
+    target, target_probabilities = None, {}
     if operation in targets:
         # Unused target heads cannot cause an action. Validate only the head the operation selects.
         target_answer = validate_choice(result["answers"].get(operation.lower() + "_target", {}), targets[operation])
         target = target_answer["choice"]
+        target_probabilities = target_answer["probabilities"]
         action = targets[operation][target]
         probability = target_answer["probabilities"][target]
     else:
@@ -148,6 +149,14 @@ async def choose(page, goal, history):
         "target": target,
         "probability": round(probability, 3),
         "confidence": round(operation_answer["confidence"], 3),
+        "operation_probabilities": operation_answer["probabilities"],
+        "target_probabilities": target_probabilities,  # full distribution over the chosen operation's targets
+        # Runner-ups (label, p) for debugging a wrong pick, e.g. why a similar-looking result won.
+        "alternatives": [
+            (targets[operation][i]["label"][:60], round(p, 3))
+            for i, p in sorted(target_probabilities.items(), key=lambda kv: -kv[1])[1:3]
+            if p >= 0.01
+        ],
         "usage": result.get("usage", {}),
         "latency_ms": round((time.perf_counter() - started) * 1000),
     }

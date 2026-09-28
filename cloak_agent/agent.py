@@ -30,7 +30,7 @@ async def run(session, goal, url=None, page=None, on_step=None):
         if operation in {"DONE", "BLOCKED"}:
             if not await session.fresh(page, state):
                 stale.append(f"{ms()}ms {operation}: page changed before completion"
-                             f" [{getattr(session, 'last_diff', '')}]")  # DEBUG diff
+                             f" [{getattr(session, 'last_diff', '')}]")  # what changed
                 state = await session.observe(page)
                 continue
             status = operation.lower()
@@ -52,7 +52,7 @@ async def run(session, goal, url=None, page=None, on_step=None):
             break
         except StalePage as e:
             stale.append(f"{ms()}ms {action['kind']} {action['label'][:40]!r}: {e}"
-                         f" [{getattr(session, 'last_diff', '')}]")  # DEBUG diff
+                         f" [{getattr(session, 'last_diff', '')}]")  # what changed
             state = await session.observe(page)
             continue
         pending_text = None
@@ -63,6 +63,7 @@ async def run(session, goal, url=None, page=None, on_step=None):
             "role": action.get("role"),
             "text": text,
             "probability": decision["probability"],
+            "alternatives": decision["alternatives"],
             "confidence": decision["confidence"],
             "jev_ms": decision["latency_ms"],
             "at_ms": ms(),
