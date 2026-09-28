@@ -1,0 +1,86 @@
+import asyncio
+import json
+
+import pytest
+
+from cloak_agent import model
+
+ACTIONS = [
+    {"id": "e1", "node": 1, "kind": "fill", "role": "combobox", "label": "Search", "value": ""},
+    {"id": "e2", "node": 1, "kind": "click", "role": "combobox", "label": "Open Search", "value": ""},
+    {"id": "e3", "node": 2, "kind": "click", "role": "checkbox", "label": "Free cancellation", "checked": "false"},
+    {"id": "e4", "node": 3, "kind": "select", "role": "combobox", "label": "Sort → Price", "value": "price",
+     "current_value": "Relevance"},
+    {"id": "scroll_down", "kind": "scroll", "label": "Scroll down", "delta": 560},
+    {"id": "wait", "kind": "wait", "label": "Wait for the page to update"},
+]
+
+
+def test_action_space_one_index_per_node_and_per_operation_targets():
+    elements, targets, controls = model.action_space(ACTIONS)
+    assert [e["index"] for e in elements] == ["1", "2", "3"]
+    assert elements[0]["operations"] == ["TYPE_TEXT", "CLICK"]
+    assert set(targets) == {"TYPE_TEXT", "CLICK", "SELECT"}
+    assert targets["TYPE_TEXT"]["1"]["id"] == "e1"
+    assert targets["SELECT"]["3:1"]["value"] == "price"
+    assert set(controls) == {"SCROLL_DOWN", "WAIT"}
+
+
+def test_validate_choice_rejects_off_menu_and_bad_distributions():
+    ok = {"choice": "a", "confidence": 0.9, "probabilities": {"a": 0.9, "b": 0.1}}
+    assert model.validate_choice(ok, {"a": 1, "b": 1}) is ok
+    for bad in (
+        {**ok, "choice": "c"},
+        {**ok, "probabilities": {"a": 0.9}},
+        {**ok, "probabilities": {"a": 0.5, "b": 0.2}},
+        {**ok, "choice": "b"},  # not the argmax
+        {},
+    ):
+        with pytest.raises(ValueError):
+            model.validate_choice(bad, {"a": 1, "b": 1})
+
+
+def _fake_post(content):
+    async def post(url, key, body, headers=None):
+        post.body, post.headers = body, headers
+        return {"choices": [{"message": {"content": content}}]}
+    return post
+
+
+CTX = {"goal": "search cats", "field": {"label": "Search"}, "page": {}, "recent_actions": []}
+
+
+def test_field_text_generic_endpoint_headers_and_reasoning(monkeypatch):
+    monkeypatch.setenv("TEXT_MODEL_API_KEY", "k")
+    monkeypatch.setenv("TEXT_MODEL", "deepseek-v4-flash")
+    monkeypatch.setenv("TEXT_MODEL_REASONING", "high")
+    monkeypatch.setenv("TEXT_MODEL_HEADERS", json.dumps({"x-opencode-session": "s"}))
+    post = _fake_post('{"text": "cats"}')
+    monkeypatch.setattr(model, "post_json", post)
+    value, info = asyncio.run(model.field_text(CTX))
+    assert value == "cats" and info["model"] == "deepseek-v4-flash"
+    assert post.body["reasoning_effort"] == "high" and post.headers == {"x-opencode-session": "s"}
+
+
+def test_field_text_null_means_needs_input_and_junk_is_rejected(monkeypatch):
+    monkeypatch.setenv("TEXT_MODEL_API_KEY", "k")
+    monkeypatch.setattr(model, "post_json", _fake_post('{"text": null}'))
+    with pytest.raises(model.NeedsInput):
+        asyncio.run(model.field_text(CTX))
+    for junk in ('{"text": "a", "extra": 1}', "not json", '{"text": 5}'):
+        monkeypatch.setattr(model, "post_json", _fake_post(junk))
+        with pytest.raises(ValueError):
+            asyncio.run(model.field_text(CTX))
+
+
+def test_resolve_redirects_decodes_clear_text_google_links_without_network():
+    md = "### [A](https://www.google.com/url?q=https://a.example/x&sa=U) and [B](https://b.example/)"
+    out = asyncio.run(model.resolve_redirects(md))
+    assert out == "### [A](https://a.example/x) and [B](https://b.example/)"
+
+
+def test_split_chunks_at_headings_and_size():
+    md = "intro\n## [A](https://a)\nsnippet a\n## B\n" + "x" * 50 + "\n\n" + "y" * 50
+    chunks = model.split_chunks(md, limit=60)
+    assert chunks[0] == "intro" and chunks[1].startswith("## [A]") and "snippet a" in chunks[1]
+    assert all(len(c) <= 60 for c in chunks)
