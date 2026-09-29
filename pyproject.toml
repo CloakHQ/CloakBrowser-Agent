@@ -1,6 +1,6 @@
 [project]
 name = "cloakbrowser-agent"
-version = "0.1.1"
+version = "0.1.2"
 description = "Jev-powered stealth browser agent: TypeSafe Jev decides each step, CloakBrowser carries it out. MCP server, CLI and Python API."
 readme = "README.md"
 keywords = ["jev", "typesafe", "system-one", "browser-agent", "ai-agent", "web-agent", "mcp", "mcp-server",
