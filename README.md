@@ -3,27 +3,35 @@
 **Give it a goal in plain language. [TypeSafe Jev](https://docs.typesafe.ai/introduction) decides every step in ~0.3 s, [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) carries it out like a human, and you get the result back as markdown.**
 
 ```text
-browse(goal="Search Google for 'CloakBrowser GitHub', open the CloakHQ/CloakBrowser repository on GitHub
-             from the results, and find how many stars it has and what the latest release is.",
-       url="https://www.google.com")
+browse(goal="Find one-way flights from Zurich to London on October 20, 2026, for one adult in economy.
+             Stop when matching flight options are visible.",
+       url="https://www.google.com/travel/flights?hl=en")
 
 status: done
 tab_id: t1 (still open)
-url: https://github.com/CloakHQ/cloakbrowser/releases
-title: Releases · CloakHQ/CloakBrowser
-steps: 3 actions, 5 decisions, 12918 ms
+url: https://www.google.com/travel/flights/search?tfs=...
+title: Zürich to London | Google Flights
+steps: 10 actions, 14 decisions, 22596 ms
 actions taken (p = Jev's probability for the chosen target; runner-ups in brackets):
-  1. fill 'Išči' = 'CloakBrowser GitHub'  p=1.0
-  2. click 'cloakbrowser github'  p=0.59 ['Iskanje Google' p=0.25, 'cloakhq cloakbrowser github' p=0.13]
-  3. click 'CloakHQ/CloakBrowser'  p=0.96 ['Open Išči' p=0.04]
+  1. click 'Change ticket type. Round trip'  p=0.81 ['Open Where from?' p=0.15, 'Flights' p=0.01]
+  2. click 'One way'  p=1.0
+  3. fill 'Where from?' = 'Zurich'  p=0.93 ['Where to? ' p=0.04, 'Departure' p=0.03]
+  4. click 'Zürich, Switzerland'  p=0.77 ['Zurich Airport (ZRH)' p=0.21, 'Open Where from? ' p=0.01]
+  5. fill 'Where to? ' = 'London'  p=0.99 ['Departure' p=0.01]
+  6. click 'London, United Kingdom'  p=0.95 ['Heathrow Airport (LHR)' p=0.02, ...]
+  7. click 'Open Departure'  p=0.97 ['Search' p=0.03]
+  8. click 'Tuesday, October 20, 2026 , 48 euros, Cheapest price'  p=0.98 ['Done. ' p=0.02]
+  9. click 'Done. Search for one-way flights, departing on October 20, 2'  p=0.98 [...]
+  10. click 'Search'  p=0.99 ['Open Where from?' p=0.01]
 ...
 <untrusted_page_content>
-[Star 31.8k](...)
-# Releases: CloakHQ/CloakBrowser
-## Chromium v152.0.7977.82.1 — ... [Latest](https://github.com/CloakHQ/CloakBrowser/releases/latest)
+# Flight search
 ...
+## Search results
+...
+from €48
 ```
-*A real run, trimmed. Google's labels are in Slovenian because of where the test machine is.*
+*A real run, trimmed.*
 
 It works as an **MCP server** (Claude Code, Cursor, Claude Desktop, any MCP client), a **CLI**, or a **Python library**.
 It runs on [CloakBrowser](https://github.com/CloakHQ/CloakBrowser), a stealth Chromium with human-like mouse and keyboard input.

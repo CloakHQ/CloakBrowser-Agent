@@ -83,7 +83,7 @@ async def run(session, goal, url=None, page=None, on_step=None):
                 status, detail = "blocked", "Three actions in a row did not change the page."
                 break
         elapsed = ms()
-        chunks = split_chunks(await session.markdown(page))
+        chunks = split_chunks(await session.settled_markdown(page))
         scores = await rank_blocks(goal, chunks)
         title = await page.title()
     except (BrowserClosed, PlaywrightError, StalePage) as e:

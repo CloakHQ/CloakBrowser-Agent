@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 
 import pytest
 
@@ -117,6 +118,40 @@ def test_choose_request_is_compact(monkeypatch):
         '[2] checkbox "Free cancellation" checked=false',
         '[3] combobox "Sort" value="Relevance" ops=SELECT options: 3:1 Price',
     ]
+
+
+def test_settled_markdown_waits_for_late_content_and_caps():
+    from cloak_agent.browser import Session
+
+    class FakeWorld:
+        def __init__(self, frames):
+            self.frames = iter(frames)
+
+        async def evaluate(self, _):
+            return next(self.frames, self.last)  # after the scripted frames, the page stays as the last one
+
+    class FakePage:
+        def __init__(self, frames):
+            self._stealth_world = FakeWorld(frames)
+            self._stealth_world.last = frames[-1]
+
+        def is_closed(self):
+            return False
+
+    class FakeContext:
+        def on(self, *_):
+            pass
+
+    s = Session(FakeContext())
+    # results arrive after two reads, then stay: we must return the final content, not the early one
+    page = FakePage(["loading", "loading", "results: 22 flights"])
+    out = asyncio.run(s.settled_markdown(page, quiet=0.2, cap=2.0, every=0.05))
+    assert out == "results: 22 flights"
+    # a page that never stops changing returns at the cap
+    endless = FakePage([str(i) for i in range(1000)])
+    t = time.perf_counter()
+    asyncio.run(s.settled_markdown(endless, quiet=0.5, cap=0.3, every=0.05))
+    assert time.perf_counter() - t < 1.0
 
 
 def test_profile_seed_is_stable_per_profile_and_recovers_from_junk(tmp_path):

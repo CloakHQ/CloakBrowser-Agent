@@ -213,6 +213,23 @@ class Session:
     async def markdown(self, page):
         return await self._eval(page, MARKDOWN_JS) or ""
 
+    async def settled_markdown(self, page, quiet=1.0, cap=4.0, every=0.25):
+        """Page markdown once it stopped changing for `quiet` seconds (cap `cap`).
+
+        Pages that fill in progressively (e.g. flight results) can look done before their content arrives;
+        extracting at that moment returned a results page with no results.
+        """
+        loop = asyncio.get_running_loop()
+        start = last_change = loop.time()
+        current = await self.markdown(page)
+        while loop.time() - start < cap and loop.time() - last_change < quiet:
+            await asyncio.sleep(every)
+            self.check_open(page)
+            latest = await self.markdown(page)
+            if latest != current:
+                current, last_change = latest, loop.time()
+        return current
+
 
 MARKER_PARTS = ["timeOrigin", "url", "scrollX", "scrollY", "innerWidth", "innerHeight", "title", "text", "actions",
                 "form_values"]
