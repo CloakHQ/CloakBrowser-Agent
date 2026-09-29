@@ -3,17 +3,27 @@
 **Give it a goal in plain language. [TypeSafe Jev](https://docs.typesafe.ai/introduction) decides every step in ~0.3 s, [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) carries it out like a human, and you get the result back as markdown.**
 
 ```text
-browse(goal="Find and open the Wikipedia article about Gödel's incompleteness theorems.",
-       url="https://en.wikipedia.org/wiki/Main_Page")
+browse(goal="Search Google for 'CloakBrowser GitHub', open the CloakHQ/CloakBrowser repository on GitHub
+             from the results, and find how many stars it has and what the latest release is.",
+       url="https://www.google.com")
 
 status: done
-url: https://en.wikipedia.org/wiki/G%C3%B6del%27s_incompleteness_theorems
-title: Gödel's incompleteness theorems - Wikipedia
-actions taken: fill 'Search Wikipedia' = "Gödel's incompleteness theorems" → click "Gödel's incompleteness theorems Limitative results"
+tab_id: t1 (still open)
+url: https://github.com/CloakHQ/cloakbrowser/releases
+title: Releases · CloakHQ/CloakBrowser
+steps: 3 actions, 5 decisions, 12918 ms
+actions taken (p = Jev's probability for the chosen target; runner-ups in brackets):
+  1. fill 'Išči' = 'CloakBrowser GitHub'  p=1.0
+  2. click 'cloakbrowser github'  p=0.59 ['Iskanje Google' p=0.25, 'cloakhq cloakbrowser github' p=0.13]
+  3. click 'CloakHQ/CloakBrowser'  p=0.96 ['Open Išči' p=0.04]
+...
 <untrusted_page_content>
-# Gödel's incompleteness theorems
-Gödel's incompleteness theorems are two [theorems](https://en.wikipedia.org/wiki/Theorem) of [mathematical logic](https://en.wikipedia.org/wiki/Mathematical_logic) ...
+[Star 31.8k](...)
+# Releases: CloakHQ/CloakBrowser
+## Chromium v152.0.7977.82.1 — ... [Latest](https://github.com/CloakHQ/CloakBrowser/releases/latest)
+...
 ```
+*A real run, trimmed. Google's labels are in Slovenian because of where the test machine is.*
 
 It works as an **MCP server** (Claude Code, Cursor, Claude Desktop, any MCP client), a **CLI**, or a **Python library**.
 It runs on [CloakBrowser](https://github.com/CloakHQ/CloakBrowser), a stealth Chromium with human-like mouse and keyboard input.
@@ -111,16 +121,47 @@ claude mcp add cloak-agent --scope user \
 
 ### Tools
 
-**`browse(goal, url?, tab_id?)`** runs one task and returns:
-- `status`: `done`, `blocked`, `needs_input` (the goal lacks a value a field needs), `budget` (step limit reached), or `error`
-- `tab_id`, the final URL and title, the actions taken
+**`browse(goal, url?, tab_id?)`** runs one whole task and returns:
+- `status`: `done`, `blocked` (no control can make progress), `needs_input` (the goal lacks a value a field needs), `budget` (step limit reached), or `error`
+- `tab_id` (the tab stays open), the final URL and title, and the number of actions, decisions and milliseconds
+- **every step taken:** what was clicked or typed, Jev's probability `p` for it, and the top runner-ups in brackets. A low `p`, or a runner-up close behind, shows where the agent was unsure.
+- **stale retries**, if any: steps re-decided because the page changed before acting, with what changed
 - the relevant page content as markdown, fenced as `<untrusted_page_content>`
+
+While a call runs, each step is also sent as a live **progress notification** (clients that show MCP progress display it).
+
+**`close_tab(tab_id)`** closes a tab.
+
+#### Working with tabs
+| Call | What happens |
+|---|---|
+| `browse(goal, url)` | New tab, opens `url`, runs the goal |
+| `browse(goal, tab_id="t1")` | Continues on the page tab `t1` is showing |
+| `browse(goal, url, tab_id="t1")` | Navigates tab `t1` to `url`, then runs the goal |
+| `browse(goal)` | Error: give a `url` or a `tab_id` |
+
+A `tab_id` stays valid until you `close_tab` it, close it in the browser, or the browser idles out. After that, `browse` answers `status: error (tab 't1' is gone; open tabs: ...)`.
+
+#### Multi-call examples
+```text
+# 1. A task that needs values the goal did not include
+browse(goal="Fill in the pizza order form and submit it.", url="https://httpbin.org/forms/post")
+  → status: needs_input (No value in the goal for field: Customer name:)   tab_id: t1
+browse(goal="Fill in the pizza order form with customer name Jane Doe, telephone 555-0100, "
+            "email jane@example.com, size medium, and submit it.", tab_id="t1")
+  → status: done   (fills all four fields on the same form, clicks 'Submit order')
+
+# 2. A follow-up step on the page the last task ended on
+browse(goal="Search Google for 'CloakBrowser GitHub' and open the CloakHQ/CloakBrowser repository.",
+       url="https://www.google.com")
+  → status: done   tab_id: t2
+browse(goal="Open the Issues tab of this repository and list the titles of the newest issues.", tab_id="t2")
+  → status: done   (1 action: click 'Issues')
+```
 
 Tips:
 - Put every value the task needs into the goal (search terms, form values), because fields are filled from the goal.
-- To continue on the same page, e.g. after `needs_input` or for a follow-up step, call `browse` again with the returned `tab_id`.
-
-**`close_tab(tab_id)`** closes a tab.
+- Several `browse` calls can run at once. Each gets its own tab in the same browser.
 
 ### Browser lifecycle
 

@@ -23,3 +23,7 @@ packages = ["cloak_agent"]
 
 [tool.ruff]
 line-length = 120
+
+[tool.ruff.lint]
+# Explicit, so local and CI ruff versions (whose defaults differ) check the same rules.
+select = ["E4", "E7", "E9", "F"]
