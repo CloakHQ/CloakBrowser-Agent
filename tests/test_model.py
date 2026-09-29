@@ -107,6 +107,8 @@ def test_choose_request_is_compact(monkeypatch):
     asyncio.run(model.choose(page, "goal", []))
     body = json.dumps(post.body)
     assert body.count(json.dumps(model.NEXT_ACTION)) == 1  # full rules sent once, in the operation question
+    # target questions get their own short element-choice rules (without them: Accept instead of Reject)
+    assert "reject/decline" in post.body["questions"]["click_target"]["instructions"]["rules"]
     assert post.body["questions"]["click_target"]["criteria"]["2"] == "[2] Free cancellation"
     # elements as one line each, explained by the legend
     assert post.body["state"]["element_format"] == model.ELEMENT_FORMAT

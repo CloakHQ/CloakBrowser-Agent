@@ -24,7 +24,11 @@ TARGET = """Choose the best observed target if the next operation is the one spe
 Use the user's entire goal, field values, nearby text, and recent actions. This question chooses only
 a target for that operation; another question decides which operation to execute. Do not choose
 a field that already contains the requested value. Choose only an offered element index.
-Role, current value and state for each index are in `elements`."""
+Role, current value and state for each index are in `elements`.
+For a cookie-consent wall, overlay or dialog blocking the page, choose its reject/decline or close
+button (accept only if there is none). After typing a query, choose the autocomplete suggestion that matches it.
+In a date picker choose the requested date, then its confirmation. Do not choose a checkbox, switch or radio that
+is already in the requested state."""
 
 ELEMENT_FORMAT = ('Each element: [index] role "label", then its current value=, state flags '
                   '(checked/selected/expanded), ops= the operations it supports (if absent: CLICK only), '
