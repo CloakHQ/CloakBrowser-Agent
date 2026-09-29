@@ -70,12 +70,14 @@ The browser binary downloads automatically on first use. Node is not needed.
 
 ## Install
 
-Not on PyPI yet. From source:
-
 ```bash
-git clone <this repo> cloakbrowser-agent && cd cloakbrowser-agent
-uv venv && uv pip install -e .        # or: python -m venv .venv && .venv/bin/pip install -e .
+pip install cloakbrowser-agent
 ```
+
+This installs the `cloak-agent` and `cloak-agent-mcp` commands, plus `cloakbrowser` (for `cloakbrowser login`).
+For MCP clients you don't even need to install it: the configs below use [`uvx`](https://docs.astral.sh/uv/), which fetches and runs it on demand.
+
+From source: `git clone https://github.com/CloakHQ/CloakBrowser-Agent && cd CloakBrowser-Agent && pip install -e .`
 
 ## Configure
 
@@ -98,7 +100,7 @@ claude mcp add cloak-agent --scope user \
   -e TYPESAFE_API_KEY=... \
   -e TEXT_MODEL_BASE_URL=https://openrouter.ai/api/v1 -e TEXT_MODEL=... -e TEXT_MODEL_API_KEY=... \
   -e CLOAKBROWSER_LICENSE_KEY=cb_... \
-  -- /path/to/cloakbrowser-agent/.venv/bin/cloak-agent-mcp
+  -- uvx --from cloakbrowser-agent cloak-agent-mcp
 ```
 
 **Cursor / Claude Desktop** (`mcpServers` in the client's config)
@@ -106,7 +108,8 @@ claude mcp add cloak-agent --scope user \
 {
   "mcpServers": {
     "cloak-agent": {
-      "command": "/path/to/cloakbrowser-agent/.venv/bin/cloak-agent-mcp",
+      "command": "uvx",
+      "args": ["--from", "cloakbrowser-agent", "cloak-agent-mcp"],
       "env": {
         "TYPESAFE_API_KEY": "...",
         "TEXT_MODEL_BASE_URL": "https://openrouter.ai/api/v1",
