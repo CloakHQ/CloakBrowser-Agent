@@ -6,6 +6,7 @@ without calls (frees the license seat) and relaunches on the next call.
 Env: TYPESAFE_API_KEY, TEXT_MODEL_* (see model.field_text), plus
   CLOAK_AGENT_CDP=http://127.0.0.1:9222  attach to a running browser instead of launching one
   CLOAK_AGENT_HEADLESS=1                  launch headless (default: headed)
+  CLOAK_AGENT_PROXY=http://u:p@host:port   launch through this proxy (ignored in CDP mode)
   CLOAK_AGENT_HUMANIZE=0                  instant input (default: humanized)
   CLOAK_AGENT_IDLE_MINUTES=5              close the browser after this long without calls
   CLOAK_AGENT_PROFILE=<dir>               browser profile (default ~/.cloakbrowser-agent/profile;
@@ -13,6 +14,7 @@ Env: TYPESAFE_API_KEY, TEXT_MODEL_* (see model.field_text), plus
 """
 
 import asyncio
+import contextlib
 import itertools
 import logging
 import os
@@ -64,6 +66,13 @@ async def _get_session():
     """Start (or attach to) the browser on first use, so an idle MCP server holds no browser."""
     global _session
     async with _session_lock:
+        if _session is not None and _session.closed:
+            # The user closed the browser: forget it and its tabs, launch a fresh one below.
+            log.info("browser was closed; relaunching on this call")
+            dead, _session = _session, None
+            _tabs.clear()
+            with contextlib.suppress(Exception):
+                await dead.close()
         if _session is None:
             humanize = os.environ.get("CLOAK_AGENT_HUMANIZE", "1") != "0"
             cdp = os.environ.get("CLOAK_AGENT_CDP")
@@ -72,14 +81,16 @@ async def _get_session():
             else:
                 headless = os.environ.get("CLOAK_AGENT_HEADLESS") == "1"
                 profile = os.environ.get("CLOAK_AGENT_PROFILE", str(DEFAULT_PROFILE))
-                _session = await Session.launch(profile=profile, headless=headless, humanize=humanize)
+                proxy = os.environ.get("CLOAK_AGENT_PROXY")
+                _session = await Session.launch(profile=profile, headless=headless, humanize=humanize,
+                                                proxy=proxy if proxy else None)
         return _session
 
 
 def _format(tab_id, result):
     lines = [
         f"status: {result['status']}" + (f" ({result['detail']})" if result["detail"] else ""),
-        f"tab_id: {tab_id} (still open)",
+        f"tab_id: {tab_id} (still open)" if tab_id else "tab: closed",
         f"url: {result['url']}",
         f"title: {result['title']}",
         f"steps: {result['actions']} actions, {result['jev_calls']} decisions, {result['elapsed_ms']} ms",
@@ -142,7 +153,13 @@ async def browse(goal: str, ctx: Context, url: str | None = None, tab_id: str | 
             result = await run(session, goal, page=page, on_step=report)
         except Exception as e:  # the tab stays open for inspection or a retry
             log.exception("browse failed")
+            if session.is_gone(page):
+                _tabs.pop(tab_id, None)
+                return f"status: error (the browser or tab is gone: {type(e).__name__})\ntab: closed\nurl: {page.url}"
             return f"status: error ({type(e).__name__}: {e})\ntab_id: {tab_id}\nurl: {page.url}"
+        if session.is_gone(page):  # closed or crashed mid-task: don't hand back a dead tab
+            _tabs.pop(tab_id, None)
+            tab_id = None
         return _format(tab_id, result)
     finally:
         _active -= 1

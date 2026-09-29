@@ -14,7 +14,9 @@ WAIT only when the needed control is absent/disabled, or submitted results are s
 If Search/Submit is visible and the required fields are ready, CLICK it immediately.
 Recent WAIT actions are not evidence of loading. Prefer a useful visible control over WAIT.
 DONE requires visible evidence that ALL requirements are satisfied. If asked to open a result,
-a matching link is not enough. BLOCKED means no supported operation can make progress.
+a matching link is not enough. BLOCKED means no supported operation can make progress, OR the only useful
+moves repeat a path that recent_actions (url → led_to) show was already followed and came back without
+reaching the goal. Never follow the same path a second time: choose BLOCKED instead.
 A cookie-consent wall, overlay, or dialog in any language that stands between the page and the goal
 is progress to clear, not a block: CLICK its reject/decline or close button (accept only if there is none)."""
 

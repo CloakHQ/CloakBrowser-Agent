@@ -100,7 +100,11 @@ async def choose(page, goal, history):
     }
     operations = {key: labels[key] for key in targets}
     operations.update({key: value["label"] for key, value in controls.items()})
-    operations.update(DONE="Every requirement is visibly satisfied.", BLOCKED="No supported operation can progress.")
+    operations.update(
+        DONE="Every requirement is visibly satisfied.",
+        BLOCKED="No supported operation can progress, or the only moves left repeat a path already tried "
+                "without success (see recent_actions url → led_to).",
+    )
     questions = {
         "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": NEXT_ACTION}}
     }
@@ -123,7 +127,9 @@ async def choose(page, goal, history):
             "page": {k: page[k] for k in ("url", "title", "text")},
             "elements": elements,
             "recent_actions": [
-                {k: h.get(k) for k in ("action", "kind", "text", "page_changed")} for h in history[-10:]
+                # url/led_to are ours (upstream sends only the first four): they let Jev see repeated circles.
+                {k: h.get(k) for k in ("action", "kind", "text", "page_changed", "url", "led_to")}
+                for h in history[-10:]
             ],
         },
         "questions": questions,

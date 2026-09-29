@@ -6,6 +6,7 @@ page._human_cfg, human._SELECT_ALL, human.scroll_async._async_smooth_wheel.
 
 import asyncio
 import json
+import logging
 import random
 from pathlib import Path
 
@@ -21,10 +22,31 @@ HERE = Path(__file__).parent
 SNAPSHOT_JS = (HERE / "snapshot.js").read_text()
 MARKDOWN_JS = (HERE / "markdown.js").read_text()
 DEFAULT_PROFILE = Path.home() / ".cloakbrowser-agent" / "profile"
+log = logging.getLogger("cloak-agent")
 
 
 class StalePage(ValueError):
     """A decision no longer refers to the observed page."""
+
+
+def profile_seed(profile):
+    """One fingerprint seed per profile, reused on every launch.
+
+    The wrapper picks a random seed per launch; with a persistent profile that shows the same returning
+    visitor (cookies, IP) on a different device each time. Seed, profile and IP belong together.
+    """
+    path = Path(profile) / "cloak-agent-seed"
+    try:
+        return int(path.read_text().strip())
+    except (FileNotFoundError, ValueError):
+        seed = random.randint(10000, 99999)  # same range as the wrapper's own seeds
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(str(seed))
+        return seed
+
+
+class BrowserClosed(RuntimeError):
+    """The browser or the task's tab was closed (e.g. by the user) while the agent was using it."""
 
 
 class Session:
@@ -35,10 +57,29 @@ class Session:
         self._owner = owner  # (playwright, browser) in connect mode
         # humanize=False: instant clicks and typing (still real input events). Faster, less human-looking.
         self.humanize = humanize
+        self.closed = False
+        context.on("close", lambda *_: setattr(self, "closed", True))
+        if owner:
+            owner[1].on("disconnected", lambda *_: setattr(self, "closed", True))
+
+    def check_open(self, page):
+        if self.closed:
+            raise BrowserClosed("the browser was closed")
+        if page.is_closed() or getattr(page, "_ca_crashed", False):
+            raise BrowserClosed("the tab was closed")
+
+    def is_gone(self, page):
+        """Browser closed, tab closed, or tab crashed (e.g. its process was killed)."""
+        return self.closed or page.is_closed() or getattr(page, "_ca_crashed", False)
 
     @classmethod
     async def launch(cls, profile=DEFAULT_PROFILE, headless=False, cdp_port=None, humanize=True, **kwargs):
-        args = [f"--remote-debugging-port={cdp_port}"] if cdp_port else []
+        seed = profile_seed(profile)
+        log.info("profile %s → fingerprint seed %s", profile, seed)
+        # User args override the wrapper's random --fingerprint default (flags are deduplicated by key).
+        args = [f"--fingerprint={seed}"] + ([f"--remote-debugging-port={cdp_port}"] if cdp_port else [])
+        # geoip explicitly: timezone/locale from the exit IP (proxy or own). The wrapper's default is off in 0.5.11.
+        kwargs.setdefault("geoip", True)
         context = await launch_persistent_context_async(
             str(profile), headless=headless, humanize=humanize, args=args, **kwargs
         )
@@ -55,6 +96,7 @@ class Session:
 
     async def new_tab(self, url=None):
         page = await self.context.new_page()
+        page.on("crash", lambda *_: setattr(page, "_ca_crashed", True))
         if getattr(page, "_stealth_world", None) is None:
             # Not humanize-patched: still read the DOM only from an isolated world, never the main world.
             world = page._stealth_world = _AsyncIsolatedWorld(page)
@@ -86,6 +128,7 @@ class Session:
             await asyncio.sleep(0.05)
         state = previous = None
         for attempt in range(100):  # up to ~10 s while a navigation settles
+            self.check_open(page)  # a closed browser/tab fails at once instead of spinning here
             state = await self._eval(page, SNAPSHOT_JS) or state
             # Pages keep mutating after load (late JS panels, lazy widgets), which invalidates decisions.
             # Wait until two snapshots 100 ms apart agree, capped at ~3 s.
@@ -116,6 +159,7 @@ class Session:
         return same
 
     async def act(self, page, state, action, text=None):
+        self.check_open(page)
         if not await self.fresh(page, state, action):
             raise StalePage("Page changed since this decision. Observe again.")
         kind, cfg = action["kind"], getattr(page, "_human_cfg", None)

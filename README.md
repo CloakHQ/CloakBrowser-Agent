@@ -180,8 +180,13 @@ Tips:
 | `CLOAK_AGENT_HUMANIZE` | on | `0` = instant clicks and typing (faster, less human-like) |
 | `CLOAK_AGENT_PROFILE` | `~/.cloakbrowser-agent/profile` | persistent browser profile (cookies and consent choices survive) |
 | `CLOAK_AGENT_CDP` | unset | attach to an already running browser, e.g. `http://127.0.0.1:9222` |
+| `CLOAK_AGENT_PROXY` | unset | launch through this proxy, e.g. `http://user:pass@host:port` (ignored with `CLOAK_AGENT_CDP`). Timezone and locale follow its exit IP |
 
 A profile can only be open in one browser at a time. Give each instance its own `CLOAK_AGENT_PROFILE`.
+
+**One identity per profile.** Each profile keeps its own fingerprint seed across launches, so a returning visitor (same cookies, same IP) looks like the same device every time. If you switch `CLOAK_AGENT_PROXY` to a different exit or country, switch to a new `CLOAK_AGENT_PROFILE` too. That way IP, cookies and device change together.
+
+The exit IP also decides which regional version of a site you get. If a store isn't available in your location, use a proxy in a country where it is.
 
 ## Use from the command line
 

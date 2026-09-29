@@ -73,6 +73,34 @@ def test_field_text_null_means_needs_input_and_junk_is_rejected(monkeypatch):
             asyncio.run(model.field_text(CTX))
 
 
+def test_choose_sends_step_urls_in_recent_actions(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+
+    async def post(url, key, body, headers=None):
+        post.body = body
+        return {"model": "jev", "answers": {"operation": {
+            "choice": "WAIT", "confidence": 1.0, "probabilities": {"WAIT": 1.0, "DONE": 0.0, "BLOCKED": 0.0}}}}
+    monkeypatch.setattr(model, "post_json", post)
+    page = {"url": "https://a/buy", "title": "T", "text": "", "actions": [
+        {"id": "wait", "kind": "wait", "label": "Wait for the page to update"}]}
+    history = [{"action": "iPhone", "kind": "click", "text": None, "page_changed": True,
+                "url": "https://a/buy", "led_to": "https://a/iphone"}]
+    asyncio.run(model.choose(page, "goal", history))
+    sent = post.body["state"]["recent_actions"][0]
+    assert sent["url"] == "https://a/buy" and sent["led_to"] == "https://a/iphone"
+
+
+def test_profile_seed_is_stable_per_profile_and_recovers_from_junk(tmp_path):
+    from cloak_agent.browser import profile_seed
+    a, b = tmp_path / "a", tmp_path / "b"
+    first = profile_seed(a)
+    assert 10000 <= first <= 99999 and profile_seed(a) == first  # same profile → same seed
+    assert (a / "cloak-agent-seed").read_text() == str(first)
+    (b / "cloak-agent-seed").parent.mkdir(parents=True)
+    (b / "cloak-agent-seed").write_text("junk")
+    assert 10000 <= profile_seed(b) <= 99999  # unreadable file → a fresh valid seed
+
+
 def test_mcp_format_shows_probabilities_alternatives_and_stale():
     from cloak_agent.mcp_server import _format
     result = {
