@@ -23,7 +23,12 @@ is progress to clear, not a block: CLICK its reject/decline or close button (acc
 TARGET = """Choose the best observed target if the next operation is the one specified in this question.
 Use the user's entire goal, field values, nearby text, and recent actions. This question chooses only
 a target for that operation; another question decides which operation to execute. Do not choose
-a field that already contains the requested value. Choose only an offered element index."""
+a field that already contains the requested value. Choose only an offered element index.
+Role, current value and state for each index are in `elements`."""
+
+ELEMENT_FORMAT = ('Each element: [index] role "label", then its current value=, state flags '
+                  '(checked/selected/expanded), ops= the operations it supports (if absent: CLICK only), '
+                  'and options: for dropdowns.')
 
 TEXT_VALUE = """Return a JSON object with exactly one key, text: the exact string to enter in the selected field.
 Infer the value from the original goal and field meaning, using current page context and history.

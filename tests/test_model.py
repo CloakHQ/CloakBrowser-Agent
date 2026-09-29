@@ -90,6 +90,33 @@ def test_choose_sends_step_urls_in_recent_actions(monkeypatch):
     assert sent["url"] == "https://a/buy" and sent["led_to"] == "https://a/iphone"
 
 
+def test_choose_request_is_compact(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+
+    async def post(url, key, body, headers=None):
+        post.body = body
+        return {"model": "jev", "answers": {
+            "operation": {"choice": "CLICK", "confidence": 1.0, "probabilities": {
+                k: float(k == "CLICK") for k in body["questions"]["operation"]["criteria"]}},
+            "click_target": {"choice": "2", "confidence": 1.0, "probabilities": {
+                k: float(k == "2") for k in body["questions"]["click_target"]["criteria"]}},
+            "type_text_target": {"choice": "1", "confidence": 1.0, "probabilities": {"1": 1.0}},
+            "select_target": {"choice": "3:1", "confidence": 1.0, "probabilities": {"3:1": 1.0}}}}
+    monkeypatch.setattr(model, "post_json", post)
+    page = {"url": "u", "title": "t", "text": "", "actions": ACTIONS}
+    asyncio.run(model.choose(page, "goal", []))
+    body = json.dumps(post.body)
+    assert body.count(json.dumps(model.NEXT_ACTION)) == 1  # full rules sent once, in the operation question
+    assert post.body["questions"]["click_target"]["criteria"]["2"] == "[2] Free cancellation"
+    # elements as one line each, explained by the legend
+    assert post.body["state"]["element_format"] == model.ELEMENT_FORMAT
+    assert post.body["state"]["elements"] == [
+        '[1] combobox "Search" ops=TYPE_TEXT,CLICK',
+        '[2] checkbox "Free cancellation" checked=false',
+        '[3] combobox "Sort" value="Relevance" ops=SELECT options: 3:1 Price',
+    ]
+
+
 def test_profile_seed_is_stable_per_profile_and_recovers_from_junk(tmp_path):
     from cloak_agent.browser import profile_seed
     a, b = tmp_path / "a", tmp_path / "b"

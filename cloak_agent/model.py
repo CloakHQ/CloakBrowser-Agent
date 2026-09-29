@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
-from .questions import NEXT_ACTION, TARGET, TEXT_VALUE
+from .questions import ELEMENT_FORMAT, NEXT_ACTION, TARGET, TEXT_VALUE
 
 CLIENT = httpx.AsyncClient(timeout=60)
 TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone"
@@ -91,6 +91,22 @@ def action_space(actions):
     return elements, targets, controls
 
 
+def element_line(e):
+    """One compact line per element, described by ELEMENT_FORMAT (the legend is required: without it Jev
+    misread the format and flipped a Flights decision 3/3 in the A/B)."""
+    s = f'[{e["index"]}] {e["role"]} "{e["label"]}"'
+    if e.get("value"):
+        s += f' value="{e["value"]}"'
+    for k in ("checked", "selected", "expanded"):
+        if k in e:
+            s += f" {k}={e[k]}"
+    if e["operations"] != ["CLICK"]:
+        s += " ops=" + ",".join(e["operations"])
+    if e.get("options"):
+        s += " options: " + "; ".join(f'{o["index"]} {o["label"].split(" → ")[-1]}' for o in e["options"])
+    return s
+
+
 async def choose(page, goal, history):
     elements, targets, controls = action_space(page["actions"])
     labels = {
@@ -105,30 +121,27 @@ async def choose(page, goal, history):
         BLOCKED="No supported operation can progress, or the only moves left repeat a path already tried "
                 "without success (see recent_actions url → led_to).",
     )
+    # Compact request (A/B 2026-09-29: ~30% fewer tokens, same decisions). The full NEXT_ACTION rules go
+    # once, inline in the operation question: rules moved into `state` and only referenced lost their effect.
+    # Target questions drop the repeated rules and point to `elements` for per-index details.
     questions = {
         "operation": {"type": "choice", "criteria": operations, "instructions": {"goal": goal, "rules": NEXT_ACTION}}
     }
     for operation, candidates in targets.items():
         questions[operation.lower() + "_target"] = {
             "type": "choice",
-            "criteria": {
-                index: {
-                    "element": f"[{index}] {a['label']}",
-                    "current_value": a.get("current_value", a.get("value", "")),
-                    **{k: a[k] for k in ("role", "checked", "selected", "expanded") if k in a},
-                }
-                for index, a in candidates.items()
-            },
-            "instructions": {"goal": goal, "operation": operation, "rules": [NEXT_ACTION, TARGET]},
+            "criteria": {index: f"[{index}] {a['label']}" for index, a in candidates.items()},
+            "instructions": {"goal": goal, "operation": operation, "rules": TARGET},
         }
     body = {
         "model": os.environ.get("TYPESAFE_MODEL", "jev-latest"),
         "state": {
+            "element_format": ELEMENT_FORMAT,
             "page": {k: page[k] for k in ("url", "title", "text")},
-            "elements": elements,
+            "elements": [element_line(e) for e in elements],
             "recent_actions": [
                 # url/led_to are ours (upstream sends only the first four): they let Jev see repeated circles.
-                {k: h.get(k) for k in ("action", "kind", "text", "page_changed", "url", "led_to")}
+                {k: h[k] for k in ("action", "kind", "text", "page_changed", "url", "led_to") if h.get(k) is not None}
                 for h in history[-10:]
             ],
         },
