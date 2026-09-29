@@ -99,6 +99,7 @@ From source: `git clone https://github.com/CloakHQ/CloakBrowser-Agent && cd Cloa
 | `TEXT_MODEL_REASONING` | no | sent as `reasoning_effort` (`low` / `medium` / `high`); `none` omits it |
 | `TEXT_MODEL_HEADERS` | no | JSON object of extra request headers, if your provider needs any |
 | `CLOAKBROWSER_LICENSE_KEY` | recommended | CloakBrowser license key (`cb_...`). Instead of setting it here, you can run `cloakbrowser login` once: the saved key is picked up automatically |
+| `CLOAKBROWSER_RELEASE_CHANNEL` | no | `preview` = launch the Preview build instead of Stable (needs a license key; ignored without one) |
 
 ## Use as an MCP server
 

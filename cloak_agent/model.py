@@ -91,6 +91,16 @@ def action_space(actions):
     return elements, targets, controls
 
 
+def scroll_gauge(scroll):
+    """Where the visible part sits in the whole page, so Jev knows controls may be further down."""
+    height = max(scroll.get("height") or 1, 1)
+    top = round(100 * scroll.get("y", 0) / height)
+    bottom = min(100, round(100 * (scroll.get("y", 0) + scroll.get("vh", height)) / height))
+    if top <= 0 and bottom >= 100:
+        return "all"
+    return f"{top}-{bottom}% (end)" if bottom >= 100 else f"{top}-{bottom}% (more below)"
+
+
 def element_line(e):
     """One compact line per element, described by ELEMENT_FORMAT (the legend is required: without it Jev
     misread the format and flipped a Flights decision 3/3 in the A/B)."""
@@ -137,7 +147,8 @@ async def choose(page, goal, history):
         "model": os.environ.get("TYPESAFE_MODEL", "jev-latest"),
         "state": {
             "element_format": ELEMENT_FORMAT,
-            "page": {k: page[k] for k in ("url", "title", "text")},
+            "page": {**{k: page[k] for k in ("url", "title", "text")},
+                     **({"scroll": scroll_gauge(page["scroll"])} if page.get("scroll") else {})},
             "elements": [element_line(e) for e in elements],
             "recent_actions": [
                 # url/led_to are ours (upstream sends only the first four): they let Jev see repeated circles.

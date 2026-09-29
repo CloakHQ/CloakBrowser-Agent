@@ -126,9 +126,14 @@
       const value=node.textContent.trim(), parent=node.parentElement;
       if (!value || !parent || parent.closest('script,style,noscript,template') || !visible(parent)) continue;
       range.selectNodeContents(node); const r=range.getBoundingClientRect();
-      if (r.width>0 && r.height>0 && r.bottom>0 && r.top<innerHeight && r.right>0 && r.left<innerWidth) {
-        words.push(value); length+=value.length;
-      }
+      if (!(r.width>0 && r.height>0 && r.bottom>0 && r.top<innerHeight && r.right>0 && r.left<innerWidth)) continue;
+      // Same visibility test as elements: text clipped by its container (e.g. calendar months outside a date
+      // picker's window) must not reach Jev, or the text claims content that has no clickable element.
+      // Hit-test the first line box: a wrapped link's bounding-box center can fall between lines.
+      const f=range.getClientRects()[0];
+      const hit=f && deepPoint(Math.min(Math.max(f.x+f.width/2,0),innerWidth-1),
+                               Math.min(Math.max(f.y+f.height/2,0),innerHeight-1));
+      if (hit && parent.contains(hit)) { words.push(value); length+=value.length; }
     }
   }
   const text=words.join('\n').slice(0,6000), height=document.documentElement.scrollHeight;
@@ -142,6 +147,6 @@
   if (scrollY+innerHeight<height-2) actions.push({id:'scroll_down',kind:'scroll',label:'Scroll down',delta:560});
   if (scrollY>0) actions.push({id:'scroll_up',kind:'scroll',label:'Scroll up',delta:-560});
   actions.push({id:'wait',kind:'wait',label:'Wait for the page to update'});
-  return {url:location.href,title:document.title,ready:document.readyState,text,scroll:{y:scrollY,height},
+  return {url:location.href,title:document.title,ready:document.readyState,text,scroll:{y:scrollY,height,vh:innerHeight},
     actions,marker:JSON.stringify(marker),page_key:JSON.stringify(page_key),guards,omitted_actions};
 })()

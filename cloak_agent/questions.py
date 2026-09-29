@@ -17,6 +17,8 @@ DONE requires visible evidence that ALL requirements are satisfied. If asked to 
 a matching link is not enough. BLOCKED means no supported operation can make progress, OR the only useful
 moves repeat a path that recent_actions (url → led_to) show was already followed and came back without
 reaching the goal. Never follow the same path a second time: choose BLOCKED instead.
+The page shows only the current screen: if the control you need is not in view and `page.scroll` shows more below,
+SCROLL_DOWN to find it before choosing BLOCKED.
 A cookie-consent wall, overlay, or dialog in any language that stands between the page and the goal
 is progress to clear, not a block: CLICK its reject/decline or close button (accept only if there is none)."""
 
@@ -27,7 +29,7 @@ a field that already contains the requested value. Choose only an offered elemen
 Role, current value and state for each index are in `elements`.
 For a cookie-consent wall, overlay or dialog blocking the page, choose its reject/decline or close
 button (accept only if there is none). After typing a query, choose the autocomplete suggestion that matches it.
-In a date picker choose the requested date, then its confirmation. Do not choose a checkbox, switch or radio that
+In a date picker choose the requested date, then its confirmation; if the requested date is not among the offered dates, click the picker's Next/Previous month control to reach it. Do not choose a checkbox, switch or radio that
 is already in the requested state."""
 
 ELEMENT_FORMAT = ('Each element: [index] role "label", then its current value=, state flags '

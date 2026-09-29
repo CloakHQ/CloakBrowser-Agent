@@ -154,6 +154,12 @@ def test_settled_markdown_waits_for_late_content_and_caps():
     assert time.perf_counter() - t < 1.0
 
 
+def test_scroll_gauge():
+    assert model.scroll_gauge({"y": 0, "height": 800, "vh": 870}) == "all"
+    assert model.scroll_gauge({"y": 0, "height": 2000, "vh": 800}) == "0-40% (more below)"
+    assert model.scroll_gauge({"y": 1200, "height": 2000, "vh": 800}) == "60-100% (end)"
+
+
 def test_profile_seed_is_stable_per_profile_and_recovers_from_junk(tmp_path):
     from cloak_agent.browser import profile_seed
     a, b = tmp_path / "a", tmp_path / "b"
