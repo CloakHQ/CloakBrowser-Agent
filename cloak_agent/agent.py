@@ -6,7 +6,17 @@ import time
 from playwright.async_api import Error as PlaywrightError
 
 from .browser import BrowserClosed, StalePage
-from .model import NeedsInput, choose, field_context, field_text, rank_blocks, resolve_redirects, split_chunks
+from .model import (
+    NeedsInput,
+    choose,
+    field_context,
+    field_text,
+    page_view,
+    rank_blocks,
+    resolve,
+    resolve_redirects,
+    split_chunks,
+)
 from .questions import MAX_STEPS
 
 TOP_BLOCKS = 8
@@ -110,3 +120,36 @@ async def run(session, goal, url=None, page=None, on_step=None):
         "markdown": await resolve_redirects("\n\n".join(chunks[i] for i in sorted(keep))),
         "block_scores": [round(scores[i], 3) for i in sorted(keep)],
     }
+
+
+async def step(session, page, *, state=None, op=None, target=None, instruction=None, text=None):
+    """One action outside the loop, for a caller taking over a stuck task.
+
+    Target mode (`op` + `target` from a snapshot): acts on `state`, the page the caller saw. `text` is typed
+    as given, without a model call (the field's value then shows in later views, like any field's).
+    Instruction mode: observes, asks Jev once; a field without `text` gets its value from the text model.
+    A page that changed since `state` raises StalePage. Nothing is retried: the caller looks again.
+    """
+    if (op is None) == (instruction is None):
+        raise ValueError("give either op (with target) or instruction")
+    decision = None
+    if op:
+        if state is None:
+            raise ValueError("no snapshot of this tab yet; call snapshot first")
+        _, targets, controls = page_view(state, [])
+        action = resolve(targets, controls, op.upper(), target)
+        if action["kind"] == "fill" and text is None:
+            raise ValueError("TYPE_TEXT needs text")
+    else:
+        state = await session.observe(page)
+        decision = await choose(state, instruction, [])
+        action = decision["action"]
+        if decision["operation"] in {"DONE", "BLOCKED"}:
+            return {"executed": False, "action": action, "decision": decision, "text": None,
+                    "state": state, "page_changed": False}
+        if action["kind"] == "fill" and text is None:
+            text, _ = await field_text(field_context(instruction, action, state, []))  # NeedsInput propagates
+    await session.act(page, state, action, text)
+    new_state = await session.observe(page, after=action)
+    return {"executed": True, "action": action, "decision": decision, "text": text,
+            "state": new_state, "page_changed": new_state["marker"] != state["marker"]}

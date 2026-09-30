@@ -117,8 +117,40 @@ def element_line(e):
     return s
 
 
-async def choose(page, goal, history):
+def page_view(page, history):
+    """What Jev sees of a page: the request `state`, plus the targets/controls its indices resolve to."""
     elements, targets, controls = action_space(page["actions"])
+    view = {
+        "element_format": ELEMENT_FORMAT,
+        "page": {**{k: page[k] for k in ("url", "title", "text")},
+                 **({"scroll": scroll_gauge(page["scroll"])} if page.get("scroll") else {})},
+        "elements": [element_line(e) for e in elements],
+        "recent_actions": [
+            # url/led_to are ours (upstream sends only the first four): they let Jev see repeated circles.
+            {k: h[k] for k in ("action", "kind", "text", "page_changed", "url", "led_to") if h.get(k) is not None}
+            for h in history[-10:]
+        ],
+    }
+    return view, targets, controls
+
+
+def resolve(targets, controls, operation, target=None):
+    """Operation + target index (as shown in the element table) → the observed action. Never a new selector."""
+    if operation in targets:
+        if target not in targets[operation]:
+            raise ValueError(f"{operation} target must be one of {sorted(targets[operation], key=_index_order)}")
+        return targets[operation][target]
+    if operation in controls:
+        return controls[operation]
+    raise ValueError(f"operation must be one of {[*targets, *controls]}")
+
+
+def _index_order(index):
+    return tuple(int(part) for part in index.split(":"))
+
+
+async def choose(page, goal, history):
+    view, targets, controls = page_view(page, history)
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
         "TYPE_TEXT": "Enter or replace text in an editable field. A small LLM will supply the value from the goal.",
@@ -143,21 +175,7 @@ async def choose(page, goal, history):
             "criteria": {index: f"[{index}] {a['label']}" for index, a in candidates.items()},
             "instructions": {"goal": goal, "operation": operation, "rules": TARGET},
         }
-    body = {
-        "model": os.environ.get("TYPESAFE_MODEL", "jev-latest"),
-        "state": {
-            "element_format": ELEMENT_FORMAT,
-            "page": {**{k: page[k] for k in ("url", "title", "text")},
-                     **({"scroll": scroll_gauge(page["scroll"])} if page.get("scroll") else {})},
-            "elements": [element_line(e) for e in elements],
-            "recent_actions": [
-                # url/led_to are ours (upstream sends only the first four): they let Jev see repeated circles.
-                {k: h[k] for k in ("action", "kind", "text", "page_changed", "url", "led_to") if h.get(k) is not None}
-                for h in history[-10:]
-            ],
-        },
-        "questions": questions,
-    }
+    body = {"model": os.environ.get("TYPESAFE_MODEL", "jev-latest"), "state": view, "questions": questions}
     started = time.perf_counter()
     result = await post_json(TYPESAFE_URL, os.environ["TYPESAFE_API_KEY"], body)
     operation_answer = validate_choice(result["answers"].get("operation", {}), operations)
@@ -168,7 +186,7 @@ async def choose(page, goal, history):
         target_answer = validate_choice(result["answers"].get(operation.lower() + "_target", {}), targets[operation])
         target = target_answer["choice"]
         target_probabilities = target_answer["probabilities"]
-        action = targets[operation][target]
+        action = resolve(targets, controls, operation, target)
         probability = target_answer["probabilities"][target]
     else:
         action = controls.get(operation) or {"id": operation, "kind": operation.lower(), "label": operation}

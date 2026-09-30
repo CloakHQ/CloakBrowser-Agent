@@ -185,6 +185,112 @@ def test_mcp_format_shows_probabilities_alternatives_and_stale():
     assert out.index("</untrusted_page_content>") > out.index("md")
 
 
+def test_resolve_maps_snapshot_indices_to_observed_actions_only():
+    _, targets, controls = model.page_view({"url": "u", "title": "t", "text": "", "actions": ACTIONS}, [])
+    assert model.resolve(targets, controls, "TYPE_TEXT", "1")["id"] == "e1"
+    assert model.resolve(targets, controls, "SELECT", "3:1")["value"] == "price"
+    assert model.resolve(targets, controls, "SCROLL_DOWN")["delta"] == 560
+    with pytest.raises(ValueError, match=r"\['1', '2'\]"):  # lists the valid targets
+        model.resolve(targets, controls, "CLICK", "9")
+    with pytest.raises(ValueError):  # DONE/BLOCKED are Jev's verdicts, not something to execute
+        model.resolve(targets, controls, "DONE")
+
+
+class FakeStepSession:
+    def __init__(self, stale=False):
+        self.acted, self.stale = [], stale
+
+    async def act(self, page, state, action, text=None):
+        self.acted.append((action["id"], text))
+        if self.stale:
+            from cloak_agent.browser import StalePage
+            raise StalePage("Page changed since this decision.")
+
+    async def observe(self, page, after=None):
+        return {**STATE, "marker": "after"}
+
+
+STATE = {"url": "u", "title": "t", "text": "", "actions": ACTIONS, "marker": "before"}
+
+
+def test_step_target_mode_types_caller_text_without_a_model(monkeypatch):
+    from cloak_agent import agent
+
+    async def no_model(*_):
+        raise AssertionError("target mode must not call a model")
+    monkeypatch.setattr(agent, "field_text", no_model)
+    monkeypatch.setattr(agent, "choose", no_model)
+    s = FakeStepSession()
+    r = asyncio.run(agent.step(s, None, state=STATE, op="type_text", target="1", text="cats"))
+    assert s.acted == [("e1", "cats")] and r["executed"] and r["page_changed"] and r["text"] == "cats"
+    with pytest.raises(ValueError, match="needs text"):
+        asyncio.run(agent.step(s, None, state=STATE, op="TYPE_TEXT", target="1"))
+    with pytest.raises(ValueError, match="snapshot first"):
+        asyncio.run(agent.step(s, None, op="CLICK", target="2"))
+    stale = FakeStepSession(stale=True)
+    with pytest.raises(Exception, match="Page changed"):
+        asyncio.run(agent.step(stale, None, state=STATE, op="CLICK", target="2"))
+    assert stale.acted == [("e3", None)]  # tried once, never retried
+
+
+def test_step_instruction_mode_done_executes_nothing(monkeypatch):
+    from cloak_agent import agent
+
+    async def done(state, goal, history):
+        return {"operation": "DONE", "action": {"id": "DONE", "kind": "done", "label": "DONE"}}
+    monkeypatch.setattr(agent, "choose", done)
+    s = FakeStepSession()
+    r = asyncio.run(agent.step(s, None, instruction="accept cookies"))
+    assert not r["executed"] and s.acted == []
+
+
+def test_mcp_browser_use_rejects_unknown_and_busy_tabs_and_releases_activity():
+    from cloak_agent import mcp_server
+
+    class Page:
+        url = "https://x"
+
+        def is_closed(self):
+            return False
+
+    class FakeSession:
+        closed = False
+
+        def is_gone(self, page):
+            return getattr(page, "crashed", False)
+
+    async def scenario():
+        b = mcp_server.Browser()
+        b.session = FakeSession()
+        with pytest.raises(mcp_server.ToolError, match="is gone"):
+            async with b.use("t9"):
+                pass
+        b.tabs["t1"] = tab = mcp_server.Tab(Page())
+        async with tab.lock:  # a browse call holds the tab
+            with pytest.raises(mcp_server.ToolError, match="busy"):
+                async with b.use("t1"):
+                    pass
+        with pytest.raises(mcp_server.ToolError, match="RuntimeError: boom") as e:
+            async with b.use("t1"):
+                raise RuntimeError("boom")
+        assert "tab_id: t1" in str(e.value) and b.active == 0 and not tab.lock.locked()
+        async with b.use("t1"):  # a call that ends normally on a tab that crashed during it
+            tab.page.crashed = True
+        assert "t1" not in b.tabs
+        b._idle_task.cancel()
+
+    asyncio.run(scenario())
+
+
+def test_mcp_view_is_what_jev_sees_and_fences_page_content():
+    from cloak_agent.mcp_server import _format_view
+    view, _, _ = model.page_view(STATE, [])
+    out = _format_view(STATE)
+    assert all(line in out for line in view["elements"])
+    assert "operations: TYPE_TEXT, CLICK, SELECT, SCROLL_DOWN, WAIT" in out
+    assert out.index("<untrusted_page_content>") < out.index(view["elements"][0])
+
+
 def test_resolve_redirects_decodes_clear_text_google_links_without_network():
     md = "### [A](https://www.google.com/url?q=https://a.example/x&sa=U) and [B](https://b.example/)"
     out = asyncio.run(model.resolve_redirects(md))

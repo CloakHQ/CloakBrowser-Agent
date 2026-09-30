@@ -142,6 +142,14 @@ claude mcp add cloak-agent --scope user \
 
 While a call runs, each step is also sent as a live **progress notification** (clients that show MCP progress display it).
 
+**`snapshot(tab_id, screenshot?)`** shows a tab exactly as the agent sees it: URL, title, scroll position, the operations on offer, the numbered element table (`[3] button "Reject all"`) and the visible text. With `screenshot=True` it also returns an image of the visible part of the page. Use it to see why a task stopped.
+
+**`act(tab_id, op?, target?, instruction?, text?, screenshot?)`** does one step in a tab yourself, for example to get past a page the agent is stuck on. Give either:
+- `op` + `target` from the latest snapshot: `CLICK "3"`, `TYPE_TEXT "5"` with `text`, `SELECT "4:2"`, or `SCROLL_DOWN` / `SCROLL_UP` / `WAIT`. No model is involved: `text` is typed exactly as given. Password fields are not offered.
+- `instruction`, one step in plain language (`"click Reject all"`). Jev picks the element; the reply shows its `p` and runner-ups.
+
+`act` returns what it did, whether the page changed, and the new snapshot, so steps can be chained. If the page changed since the snapshot, nothing is done and it answers `status: stale`. A tab serves one call at a time; a second call on it answers `busy`. Continue the task with `browse(goal, tab_id=...)` whenever you like.
+
 **`close_tab(tab_id)`** closes a tab.
 
 #### Working with tabs
@@ -169,6 +177,15 @@ browse(goal="Search Google for 'CloakBrowser GitHub' and open the CloakHQ/CloakB
   → status: done   tab_id: t2
 browse(goal="Open the Issues tab of this repository and list the titles of the newest issues.", tab_id="t2")
   → status: done   (1 action: click 'Issues')
+
+# 3. Taking over a stuck task: look, do one step by hand, let the agent continue
+snapshot(tab_id="t3")
+  → [2] searchbox "Search Wikipedia" ops=TYPE_TEXT,CLICK ...
+act(tab_id="t3", op="TYPE_TEXT", target="2", text="Kurt Gödel")
+  → status: done   (new snapshot: [3] option "Kurt Gödel Mathematician and philosopher (1906–1978)" ...)
+act(tab_id="t3", op="CLICK", target="3")
+  → status: done   url: https://en.wikipedia.org/wiki/Kurt_G%C3%B6del
+browse(goal="Summarize his incompleteness theorems.", tab_id="t3")
 ```
 
 Tips:
