@@ -160,15 +160,25 @@ def test_scroll_gauge():
     assert model.scroll_gauge({"y": 1200, "height": 2000, "vh": 800}) == "60-100% (end)"
 
 
-def test_profile_seed_is_stable_per_profile_and_recovers_from_junk(tmp_path):
-    from cloak_agent.browser import profile_seed
-    a, b = tmp_path / "a", tmp_path / "b"
-    first = profile_seed(a)
-    assert 10000 <= first <= 99999 and profile_seed(a) == first  # same profile → same seed
-    assert (a / "cloak-agent-seed").read_text() == str(first)
-    (b / "cloak-agent-seed").parent.mkdir(parents=True)
-    (b / "cloak-agent-seed").write_text("junk")
-    assert 10000 <= profile_seed(b) <= 99999  # unreadable file → a fresh valid seed
+def test_legacy_seed_is_handed_to_the_wrapper_once(tmp_path):
+    from cloak_agent.browser import LEGACY_SEED_FILE, PROFILE_SEED_FILE, adopt_legacy_seed
+    old, new = tmp_path / LEGACY_SEED_FILE, tmp_path / PROFILE_SEED_FILE
+    adopt_legacy_seed(tmp_path)
+    assert not new.exists()  # no old seed → the wrapper picks one
+    old.write_text("24911")
+    adopt_legacy_seed(tmp_path)
+    assert new.read_text() == "24911" and old.exists()  # copied, so an older agent keeps the same seed
+    new.write_text("33333\n")
+    adopt_legacy_seed(tmp_path)
+    assert new.read_text() == "33333\n"  # the wrapper's seed is never overwritten
+
+
+def test_wrapper_internals_we_use_exist():
+    # Loose pin (<0.7): this only catches a rename when CI runs, it doesn't protect published installs.
+    from cloakbrowser.human import Human
+    from cloakbrowser.human.world import Worlds
+    assert all(hasattr(Human, n) for n in ("ensure_cursor", "press_mouse", "_wheel_burst"))
+    assert hasattr(Worlds, "evaluate")
 
 
 def test_mcp_format_shows_probabilities_alternatives_and_stale():

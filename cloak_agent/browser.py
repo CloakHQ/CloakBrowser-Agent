@@ -1,7 +1,7 @@
 """CloakBrowser session: launch or connect over CDP, observe in the isolated world, act through humanize.
 
-Uses cloakbrowser internals (pinned version): page._stealth_world, page._human_raw_mouse,
-page._human_cfg, human._SELECT_ALL, human.scroll_async._async_smooth_wheel.
+Uses cloakbrowser internals (0.6.x): page._stealth_world, page._human_cfg, the page's engine
+page._impl_obj._cloak_human (ensure_cursor, press_mouse, _wheel_burst), human.world.Worlds.
 """
 
 import asyncio
@@ -9,14 +9,15 @@ import base64
 import json
 import logging
 import random
+import shutil
 from pathlib import Path
 
 from cloakbrowser import launch_persistent_context_async
-from cloakbrowser.human import _SELECT_ALL, _AsyncIsolatedWorld, patch_context_async
+from cloakbrowser.config import PROFILE_SEED_FILE
+from cloakbrowser.human import patch_context_async
 from cloakbrowser.human.config import resolve_config
 from cloakbrowser.human.mouse import click_target
-from cloakbrowser.human.mouse_async import async_human_click
-from cloakbrowser.human.scroll_async import _async_smooth_wheel
+from cloakbrowser.human.world import Worlds
 from playwright.async_api import async_playwright
 
 HERE = Path(__file__).parent
@@ -30,20 +31,29 @@ class StalePage(ValueError):
     """A decision no longer refers to the observed page."""
 
 
-def profile_seed(profile):
-    """One fingerprint seed per profile, reused on every launch.
+LEGACY_SEED_FILE = "cloak-agent-seed"  # agent 0.1.x kept its own per-profile seed here
 
-    The wrapper picks a random seed per launch; with a persistent profile that shows the same returning
-    visitor (cookies, IP) on a different device each time. Seed, profile and IP belong together.
+
+def adopt_legacy_seed(profile):
+    """Hand an agent 0.1.x seed to the wrapper, which keeps one seed per profile since 0.6.0.
+
+    Without this an existing profile would get a new random seed: same cookies and IP on another device.
+    Must run before launch (the wrapper reads its seed file while launching). Copied, not moved, so an
+    older agent on this profile keeps the same seed too.
     """
-    path = Path(profile) / "cloak-agent-seed"
-    try:
-        return int(path.read_text().strip())
-    except (FileNotFoundError, ValueError):
-        seed = random.randint(10000, 99999)  # same range as the wrapper's own seeds
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(str(seed))
-        return seed
+    old, new = Path(profile) / LEGACY_SEED_FILE, Path(profile) / PROFILE_SEED_FILE
+    if old.exists() and not new.exists():
+        shutil.copyfile(old, new)
+
+
+class _World:
+    """Main-frame isolated world for a page without humanize (Worlds re-creates it after navigation)."""
+
+    def __init__(self, page):
+        self._worlds, self._frame = Worlds(page._impl_obj), page._impl_obj.main_frame
+
+    def evaluate(self, expression):
+        return self._worlds.evaluate(self._frame, expression)
 
 
 class BrowserClosed(RuntimeError):
@@ -75,15 +85,16 @@ class Session:
 
     @classmethod
     async def launch(cls, profile=DEFAULT_PROFILE, headless=False, cdp_port=None, humanize=True, **kwargs):
-        seed = profile_seed(profile)
-        log.info("profile %s → fingerprint seed %s", profile, seed)
-        # User args override the wrapper's random --fingerprint default (flags are deduplicated by key).
-        args = [f"--fingerprint={seed}"] + ([f"--remote-debugging-port={cdp_port}"] if cdp_port else [])
-        # geoip explicitly: timezone/locale from the exit IP (proxy or own). The wrapper's default is off in 0.5.11.
+        adopt_legacy_seed(profile)
+        args = [f"--remote-debugging-port={cdp_port}"] if cdp_port else []
+        # geoip explicitly: timezone/locale from the exit IP (proxy or own). The wrapper's default is off.
         kwargs.setdefault("geoip", True)
         context = await launch_persistent_context_async(
             str(profile), headless=headless, humanize=humanize, args=args, **kwargs
         )
+        seed_file = Path(profile) / PROFILE_SEED_FILE
+        log.info("profile %s → fingerprint seed %s", profile,
+                 seed_file.read_text().strip() if seed_file.exists() else "not pinned")
         return cls(context, humanize=humanize)
 
     @classmethod
@@ -100,8 +111,7 @@ class Session:
         page.on("crash", lambda *_: setattr(page, "_ca_crashed", True))
         if getattr(page, "_stealth_world", None) is None:
             # Not humanize-patched: still read the DOM only from an isolated world, never the main world.
-            world = page._stealth_world = _AsyncIsolatedWorld(page)
-            page.on("framenavigated", lambda frame: world.invalidate() if frame == page.main_frame else None)
+            page._stealth_world = _World(page)
         if url:
             await page.goto(url, wait_until="domcontentloaded")
         return page
@@ -117,6 +127,11 @@ class Session:
     @staticmethod
     async def _eval(page, expression):
         return await page._stealth_world.evaluate(expression)
+
+    async def _select_all_key(self, page):
+        """Follows the persona like the wrapper's engine: a macOS persona selects with Meta, others with Control."""
+        platform = await self._eval(page, "navigator.platform") or ""
+        return "Meta+a" if platform.lower().startswith("mac") else "Control+a"
 
     async def observe(self, page, after=None):
         if after and after["kind"] == "fill" and after.get("role") == "combobox":
@@ -169,7 +184,9 @@ class Session:
             return
         if kind == "scroll":
             if self.humanize:
-                await _async_smooth_wheel(page._human_raw_mouse, action["delta"], cfg)
+                human = page._impl_obj._cloak_human
+                await human.ensure_cursor(cfg)  # the cursor is placed lazily; don't wheel at (0, 0)
+                await human._wheel_burst(0, action["delta"], cfg)
             else:
                 await page.mouse.wheel(0, action["delta"])
             return
@@ -186,7 +203,7 @@ class Session:
             # box() already hit-tested the center. Playwright's plain click/type: real input events, no delays.
             await page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
             if kind == "fill":
-                await page.keyboard.press(_SELECT_ALL)
+                await page.keyboard.press(await self._select_all_key(page))
                 await page.keyboard.press("Backspace")
                 await page.keyboard.type(text)
             return
@@ -202,10 +219,10 @@ class Session:
         # The move takes hundreds of ms; the page may have shifted. Re-hit-test before pressing.
         if not await self._eval(page, f"window.__ca?.hit({node}, {point.x}, {point.y})"):
             raise StalePage("Target moved or became covered during the approach.")
-        await async_human_click(page._human_raw_mouse, box["input"], cfg)
+        await page._impl_obj._cloak_human.press_mouse(cfg, box["input"])
         if kind == "fill":
             await asyncio.sleep(random.uniform(0.1, 0.25))
-            await page.keyboard.press(_SELECT_ALL)
+            await page.keyboard.press(await self._select_all_key(page))
             await asyncio.sleep(random.uniform(0.03, 0.08))
             await page.keyboard.press("Backspace")
             await asyncio.sleep(random.uniform(0.05, 0.15))
