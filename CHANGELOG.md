@@ -4,6 +4,17 @@ All notable changes to cloakbrowser-agent are documented here.
 
 ---
 
+## [0.1.6] — 2026-10-14
+
+- **DONE is checked a second time.** When the agent picks DONE, Jev is asked about the page both ways ("is the goal achieved?" and "is it NOT achieved yet?"). If they disagree, the task ends as the new status `done_unverified`, so the caller can look at the page before trusting it. The output shows a `done check:` line.
+- **Loop brake.** The same action on the same page a 3rd time ends the task as `blocked`. This catches cycles that change the page on every step, which the "no change" stop can't see.
+- **Logins without exposing the password.** `browse(secrets={"password": "env:SHOP_PW"})` (MCP, `env:` references only) or `run(secrets={...})` (Python). Jev picks which secret fits each field, the value is typed locally, and every model request, step, page content and later `snapshot`/`act` reply shows `[secret:name]` instead. Password fields are now offered with a masked value. A password field with no matching secret ends as `needs_input`; the text model never writes a password.
+- **Date and time fields** (`date`, `time`, `datetime-local`, `month`, `week`) are now offered, with `type=` in the element table. The text model writes the standard format (`18:30`, `2026-10-28`) and the value is set on the field directly.
+- Each step shows Jev's probability for the operation and its runner-up next to the target `p`: `op=CLICK 0.43 (SCROLL_DOWN 0.35)`. In our tests, wrong clicks showed up in a low `op` more than in `p`.
+- Results and snapshots note when elements were left out by the 250-element cap.
+- A typed value is reused only for the same field (two same-labeled fields no longer share one after a retry).
+- A model provider error sent with HTTP 200 now surfaces with the provider's message.
+
 ## [0.1.5] — 2026-10-14
 
 - Requires cloakbrowser 0.6.3 or newer (`cloakbrowser[geoip]>=0.6.3,<0.7`). Humanized typing, mouse moves and scrolling follow its new human timing: keys held and overlapping like a real typist, mouse moves that take longer the farther they go, and scrolling in whole mouse-wheel notches.
