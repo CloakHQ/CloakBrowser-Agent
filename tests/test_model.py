@@ -533,3 +533,44 @@ def test_split_chunks_at_headings_and_size():
     chunks = model.split_chunks(md, limit=60)
     assert chunks[0] == "intro" and chunks[1].startswith("## [A]") and "snippet a" in chunks[1]
     assert all(len(c) <= 60 for c in chunks)
+
+
+class FakeTwoNamesSession(FakeRunSession):
+    """Two empty fields with the same label: their text-model inputs are identical. The first fill goes stale."""
+    async def observe(self, page, after=None):
+        self.observed += 1
+        return {"url": "u", "title": "t", "text": "form", "omitted_actions": 0, "marker": f"m{self.observed}",
+                "actions": [
+                    {"id": f"e{n}", "node": n, "kind": "fill", "role": "textbox", "label": "Name", "value": ""}
+                    for n in (1, 2)]}
+
+    async def act(self, page, state, action, text=None):
+        from cloak_agent.browser import StalePage
+        if not self.acted:
+            self.acted.append(None)
+            raise StalePage("changed")
+        self.acted.append((action["node"], text))
+
+
+def test_text_cache_does_not_cross_same_labeled_fields(monkeypatch):
+    from cloak_agent import agent
+    monkeypatch.setattr(model, "post_json", fake_jev([], {
+        "operation": ["TYPE_TEXT", "TYPE_TEXT", "DONE"], "type_text_target": ["1", "2", "2"]}))
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    values = iter(["John", "Jane"])
+
+    async def text_model(context):
+        return next(values), {"latency_ms": 1}
+    monkeypatch.setattr(agent, "field_text", text_model)
+    s = FakeTwoNamesSession()
+    asyncio.run(agent.run(s, "fill the form", page=FakePage()))
+    assert s.acted == [None, (2, "Jane")]  # field 2 gets its own value, not field 1's cached "John"
+
+
+def test_post_json_raises_on_error_body(monkeypatch):
+    import httpx
+    body = {"error": {"message": "Upstream idle timeout exceeded", "code": 504}}
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=body))
+    monkeypatch.setattr(model, "CLIENT", httpx.AsyncClient(transport=transport))
+    with pytest.raises(RuntimeError, match="Upstream idle timeout exceeded"):
+        asyncio.run(model.post_json("https://x.test", "k", {}))

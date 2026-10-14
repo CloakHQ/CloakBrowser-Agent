@@ -36,7 +36,10 @@ async def post_json(url, key, body, headers=None):
             continue
         if response.is_error:
             raise RuntimeError(f"Model provider returned HTTP {response.status_code}: {response.text[:300]}")
-        return response.json()
+        data = response.json()
+        if isinstance(data, dict) and data.get("error"):  # some providers send errors as HTTP 200
+            raise RuntimeError(f"Model provider returned an error: {str(data['error'])[:300]}")
+        return data
     raise RuntimeError("Model unavailable")
 
 

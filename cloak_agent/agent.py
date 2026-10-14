@@ -113,13 +113,15 @@ async def run(session, goal, url=None, page=None, on_step=None, secrets=None):
                     raise NeedsInput(action["label"])  # never let the text model invent a password
                 elif action["kind"] == "fill":
                     context = field_context(goal, action, redact(state, secrets), history)
-                    if pending_text and pending_text[0] == context:
+                    # Same-labeled fields build identical contexts, so the cache also needs the field itself.
+                    key = (action["node"], context)
+                    if pending_text and pending_text[0] == key:
                         text = pending_text[1]
                     else:
                         text, info = await field_text(context)
                         text_calls += 1
                         timing["text_ms"] += info["latency_ms"]
-                        pending_text = (context, text)
+                        pending_text = (key, text)
                     shown = text
                 await session.act(page, state, action, text)
             except NeedsInput as e:

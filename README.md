@@ -56,16 +56,19 @@ goal ─► OBSERVE  read the page → numbered table of the controls a user can
           │  DECIDE  one Jev request: which operation (CLICK, TYPE_TEXT, SELECT, SCROLL, WAIT, DONE, BLOCKED)
           │          and which element, answered together
           │          TYPE_TEXT → a small text model writes only the value for that one field
+          │                      (or a caller secret is typed locally, see Logins)
           │
           └─ ACT     human-like click / typing, after checking the page did not change
-DONE → the page is turned into markdown, Jev scores each section against the goal, the best sections are returned
+DONE → a second check asks Jev "achieved?" and "NOT achieved?" about the page (disagreement → done_unverified)
+     → the page is turned into markdown, Jev scores each section against the goal, the best sections are returned
 ```
 
 - **No site-specific code.** The same loop runs on every site and re-plans from the current page after every action. Cookie walls, popups and changed layouts are just more elements to choose from.
 - **Model output never becomes code.** The model picks from indices we built. It never writes selectors, coordinates or scripts.
 - **Nothing is injected into the page.** The page is read without adding anything to it that the site's scripts can see.
 - **Only reachable controls are offered.** Hidden, disabled, and covered elements (for example, behind a modal) aren't in the table.
-- **A DONE answer isn't taken as proof.** Check results that matter.
+- **A DONE answer isn't taken as proof.** It's checked a second time, but check results that matter.
+- **Loops stop.** The same action on the same page a 3rd time ends the task as `blocked`, as do three actions in a row that change nothing.
 
 ## Requirements
 
@@ -267,7 +270,7 @@ Jev decisions take ~0.3 s each, roughly 1 s per task. Filling a field with the t
 ## Limits
 
 - Frames, closed shadow roots, canvas apps, file uploads, links that open new tabs, and CAPTCHAs aren't handled.
-- Native `<select>` values are set programmatically, not through a mouse-driven dropdown.
+- Native `<select>` values, and date/time fields (`date`, `time`, `datetime-local`, `month`, `week`), are set programmatically, not through a mouse-driven dropdown or picker. Sliders (`range`) and color pickers aren't offered.
 - Autocomplete: after typing, it may pick a close suggestion instead of submitting the exact text.
 - A password field's value is never read: the model sees it only as filled or empty, and fills it only from `secrets`.
 - A valid action can still be the wrong one, and `done` means the model saw the goal as met and a second check agreed. Check results that matter.
