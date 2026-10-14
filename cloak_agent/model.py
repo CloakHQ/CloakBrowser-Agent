@@ -71,7 +71,8 @@ def action_space(actions):
         if node not in indices:
             index = str(len(elements) + 1)
             indices[node] = index
-            element = {k: action[k] for k in ("role", "value", "checked", "selected", "expanded") if k in action}
+            element = {k: action[k] for k in ("role", "value", "checked", "selected", "expanded", "input_type")
+                       if k in action}
             element.update(index=index, label=action["label"].split(" → ")[0], operations=[])
             if kind == "select":
                 element["value"] = action.get("current_value", "")
@@ -105,6 +106,8 @@ def element_line(e):
     """One compact line per element, described by ELEMENT_FORMAT (the legend is required: without it Jev
     misread the format and flipped a Flights decision 3/3 in the A/B)."""
     s = f'[{e["index"]}] {e["role"]} "{e["label"]}"'
+    if e.get("input_type"):
+        s += f' type={e["input_type"]}'
     if e.get("value"):
         s += f' value="{e["value"]}"'
     for k in ("checked", "selected", "expanded"):
@@ -274,7 +277,8 @@ async def verify_done(page, goal, history):
 def field_context(goal, action, page, history):
     return {
         "goal": goal,
-        "field": {k: action.get(k) for k in ("label", "role", "value")},
+        "field": {**{k: action.get(k) for k in ("label", "role", "value")},
+                  **({"input_type": action["input_type"]} if action.get("input_type") else {})},
         "page": {"title": page["title"], "text": page["text"][:6000]},
         "recent_actions": [{k: h.get(k) for k in ("action", "text")} for h in history[-6:]],
     }

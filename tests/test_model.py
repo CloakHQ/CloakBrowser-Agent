@@ -27,6 +27,15 @@ def test_action_space_one_index_per_node_and_per_operation_targets():
     assert set(controls) == {"SCROLL_DOWN", "WAIT"}
 
 
+def test_date_time_fields_show_their_type_to_jev_and_the_text_model():
+    time_field = {"id": "e1", "node": 7, "kind": "fill", "role": "textbox", "label": "Preferred delivery time",
+                  "value": "", "input_type": "time"}
+    elements, targets, _ = model.action_space([time_field])
+    assert model.element_line(elements[0]) == '[1] textbox "Preferred delivery time" type=time ops=TYPE_TEXT'
+    assert model.field_context("goal", time_field, STATE, [])["field"]["input_type"] == "time"
+    assert "input_type" not in model.field_context("goal", ACTIONS[0], STATE, [])["field"]
+
+
 def test_validate_choice_rejects_off_menu_and_bad_distributions():
     ok = {"choice": "a", "confidence": 0.9, "probabilities": {"a": 0.9, "b": 0.1}}
     assert model.validate_choice(ok, {"a": 1, "b": 1}) is ok

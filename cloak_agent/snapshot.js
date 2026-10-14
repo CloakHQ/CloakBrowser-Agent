@@ -25,6 +25,9 @@
   const offered = e => !['file','hidden'].includes(e.type);
   const secret = e => e.tagName==='INPUT' && e.type==='password';
   const val = e => secret(e) ? (e.value ? '••••' : '') : e.value;
+  // Date/time inputs: typed keys follow the browser locale's field order, so they are set by value (ISO format).
+  const DATE_TYPES = ['date','time','datetime-local','month','week'];
+  const dateInput = e => e.tagName==='INPUT' && DATE_TYPES.includes(e.type);
   const visible = e => !e.closest('[aria-hidden="true"],[inert]') &&
     e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true});
   const name = (e,seen=new Set()) => {
@@ -55,7 +58,7 @@
       if (['button','submit','reset','image'].includes(e.type)) return 'button';
       if (e.type==='search') return 'searchbox';
       if (e.type==='number') return 'spinbutton';
-      if (['text','email','url','tel','password',''].includes(e.type)) return 'textbox';
+      if (['text','email','url','tel','password',''].includes(e.type) || DATE_TYPES.includes(e.type)) return 'textbox';
     }
     return null;
   };
@@ -95,6 +98,15 @@
     e.dispatchEvent(new Event('change',{bubbles:true}));
     return true;
   };
+  cache.setDate=(id,value)=>{
+    const e=cache.nodes.get(id);
+    if (!e?.isConnected || !dateInput(e) || e.disabled || e.readOnly) return false;
+    e.value=value;
+    if (e.value!==value) return false;  // the browser rejected the format: report it, don't half-fill
+    e.dispatchEvent(new Event('input',{bubbles:true}));
+    e.dispatchEvent(new Event('change',{bubbles:true}));
+    return true;
+  };
   const actions=[];
   for (const e of deepAll(selector)) {
     if (!offered(e) || !visible(e) || e.matches(':disabled') || e.closest('[aria-disabled="true"]')) continue;
@@ -110,6 +122,7 @@
     }
     if (['checkbox','radio'].includes(e.type)) base.checked=String(e.checked);
     if (secret(e)) base.secret=true;
+    if (dateInput(e)) base.input_type=e.type;
     if (e.tagName==='SELECT') {
       for (const o of e.options) if (!o.selected && !o.disabled && !o.closest('optgroup[disabled]'))
         actions.push({...base,kind:'select',value:o.value,

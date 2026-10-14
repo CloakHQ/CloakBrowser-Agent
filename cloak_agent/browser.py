@@ -196,6 +196,13 @@ class Session:
             if not ok:
                 raise RuntimeError("Dropdown execution was not confirmed; inspect before retrying.")
             return
+        if kind == "fill" and action.get("input_type"):
+            # Date/time inputs: keys map to the locale's field order, so set the ISO value (untrusted events,
+            # like select above).
+            ok = await self._eval(page, f"window.__ca?.setDate({node}, {json.dumps(text)})")
+            if not ok:
+                raise RuntimeError(f"The {action['input_type']} field did not accept {text!r}; nothing was set.")
+            return
         box = await self._eval(page, f"window.__ca?.box({node}, {json.dumps(kind)})")
         if not box:
             raise StalePage("Target changed or is covered. Observe again.")
