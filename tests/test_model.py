@@ -185,13 +185,17 @@ def test_mcp_format_shows_probabilities_alternatives_and_stale():
     from cloak_agent.mcp_server import _format
     result = {
         "status": "done", "detail": None, "url": "https://x", "title": "T", "actions": 1, "jev_calls": 2,
-        "elapsed_ms": 10, "markdown": "md", "stale": ["120ms click 'A': moved []"],
+        "elapsed_ms": 10, "markdown": "md", "stale": ["120ms click 'A': moved []"], "omitted_max": 3,
         "trace": [{"step": 1, "kind": "click", "action": "CloakHQ/CloakBrowser", "text": None,
-                   "probability": 0.94, "alternatives": [("GitHub Projects on X", 0.05)]}],
+                   "probability": 0.94, "alternatives": [("GitHub Projects on X", 0.05)],
+                   "op": "CLICK", "op_p": 0.43, "op_alt": [("SCROLL_DOWN", 0.35)]}],
     }
     out = _format("t1", result)
-    assert "1. click 'CloakHQ/CloakBrowser'  p=0.94 ['GitHub Projects on X' p=0.05]" in out
+    assert ("1. click 'CloakHQ/CloakBrowser'  p=0.94 ['GitHub Projects on X' p=0.05]"
+            " op=CLICK 0.43 (SCROLL_DOWN 0.35)") in out
     assert "stale retries" in out and "moved" in out
+    assert "note: 3 elements on screen were not offered" in out
+    assert "not offered" not in _format("t1", {**result, "omitted_max": 0})
     assert out.index("</untrusted_page_content>") > out.index("md")
 
 
@@ -252,6 +256,214 @@ def test_step_instruction_mode_done_executes_nothing(monkeypatch):
     s = FakeStepSession()
     r = asyncio.run(agent.step(s, None, instruction="accept cookies"))
     assert not r["executed"] and s.acted == []
+
+
+class FakePage:
+    url = "u"
+
+    async def title(self):
+        return "t"
+
+
+class FakeRunSession:
+    """run()'s view of a browser: each observe returns texts[i % len(texts)] (or a growing text)."""
+    closed = False
+    last_diff = ""
+
+    def __init__(self, texts=None):
+        self.texts, self.observed, self.acted = texts, 0, []
+
+    async def observe(self, page, after=None):
+        text = self.texts[self.observed % len(self.texts)] if self.texts else f"month {self.observed}"
+        self.observed += 1
+        return {**STATE, "text": text, "marker": f"m{self.observed}", "omitted_actions": 0,
+                "scroll": {"y": 100 * self.observed, "height": 9000, "vh": 800}}
+
+    async def fresh(self, page, state, action=None):
+        return True
+
+    async def act(self, page, state, action, text=None):
+        self.acted.append((state["text"], action["label"], text))
+
+    async def settled_markdown(self, page):
+        return "md"
+
+    def is_gone(self, page):
+        return False
+
+
+def decision(label, operation="CLICK", kind="click"):
+    return {"action": {"id": label, "kind": operation.lower() if operation in {"DONE", "BLOCKED"} else kind,
+                       "label": label},
+            "operation": operation, "target": None, "probability": 0.9, "confidence": 0.9, "alternatives": [],
+            "operation_probabilities": {operation: 0.9, "SCROLL_DOWN": 0.1}, "latency_ms": 1}
+
+
+def run_fake(monkeypatch, session, pick, verified=True):
+    from cloak_agent import agent
+
+    async def choose(state, goal, history, **_):
+        return pick(state, history)
+
+    async def verify(state, goal, history):
+        if verified == "raise":
+            raise RuntimeError("Model provider returned HTTP 503")
+        return {"achieved": 0.9 if verified else 0.55, "not_achieved": 0.1 if verified else 0.56,
+                "verified": verified, "latency_ms": 1}
+    monkeypatch.setattr(agent, "verify_done", verify)
+
+    async def ranks(goal, chunks):
+        return [1.0] * len(chunks)
+
+    async def same(markdown):
+        return markdown
+    monkeypatch.setattr(agent, "choose", choose)
+    monkeypatch.setattr(agent, "rank_blocks", ranks)
+    monkeypatch.setattr(agent, "resolve_redirects", same)
+    return asyncio.run(agent.run(session, "goal", page=FakePage()))
+
+
+def test_loop_brake_stops_a_cycle_before_the_third_repeat(monkeypatch):
+    s = FakeRunSession(["page A", "page B"])  # every click changes the page, so the no-change brake never fires
+    r = run_fake(monkeypatch, s, lambda state, h: decision("X" if state["text"] == "page A" else "Y"))
+    assert r["status"] == "blocked" and "3rd time" in r["detail"]
+    assert [a[:2] for a in s.acted] == [("page A", "X"), ("page B", "Y"), ("page A", "X"), ("page B", "Y")]
+
+
+def test_loop_brake_ignores_repeats_that_change_the_text(monkeypatch):
+    s = FakeRunSession()  # "Next month": same click, new visible text each time
+    r = run_fake(monkeypatch, s, lambda state, h: decision("DONE", "DONE") if len(h) == 5 else decision("Next"))
+    assert len(s.acted) == 5 and r["status"] == "done" and r["done_check"]["verified"]
+
+
+def test_done_check_disagreement_returns_done_unverified(monkeypatch):
+    r = run_fake(monkeypatch, FakeRunSession(), lambda state, h: decision("DONE", "DONE"), verified=False)
+    assert r["status"] == "done_unverified" and "0.56" in r["detail"] and r["jev_calls"] == 2
+
+
+def test_verify_done_asks_straight_and_negated_in_one_request(monkeypatch):
+    bodies = []
+
+    async def fake_post(url, key, body, headers=None):
+        bodies.append(body)
+        return {"answers": {"achieved": {"noul": 0.55}, "not_achieved": {"noul": 0.56}}}
+    monkeypatch.setattr(model, "post_json", fake_post)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+    r = asyncio.run(model.verify_done(STATE, "goal", []))
+    assert len(bodies) == 1 and set(bodies[0]["questions"]) == {"achieved", "not_achieved"}
+    assert bodies[0]["state"]["goal"] == "goal" and not r["verified"]
+
+
+def test_redact_replaces_values_longest_first_in_nested_data():
+    secrets = {"user": "student", "pw": "student123"}
+    out = model.redact({"a": ["hi student123", ("student",)], "n": 3}, secrets)
+    assert out == {"a": ["hi [secret:pw]", ("[secret:user]",)], "n": 3}
+    assert model.redact({"a": "x"}, None) == {"a": "x"}
+
+
+def test_mcp_secrets_accept_only_env_references(monkeypatch):
+    from cloak_agent.mcp_server import ToolError, resolve_secrets
+    monkeypatch.setenv("SHOP_PW", "hunter22")
+    assert resolve_secrets({"password": "env:SHOP_PW"}) == {"password": "hunter22"}
+    assert resolve_secrets(None) is None
+    with pytest.raises(ToolError, match="env:NAME reference"):
+        resolve_secrets({"password": "hunter22"})
+    monkeypatch.delenv("NOPE", raising=False)
+    with pytest.raises(ToolError, match="NOPE is not set"):
+        resolve_secrets({"password": "env:NOPE"})
+
+
+LOGIN = {"url": "https://x/home?user=student", "title": "t", "text": "Logged in as student", "omitted_actions": 0,
+         "actions": [
+    {"id": "e1", "node": 1, "kind": "fill", "role": "textbox", "label": "Password", "value": "", "secret": True},
+    {"id": "wait", "kind": "wait", "label": "Wait for the page to update"}]}
+
+
+def fake_jev(bodies, picks):
+    """Answers every question of a request: noul 0.9 (not_achieved 0.1), choices from `picks` (by question id;
+    a list is consumed one per request)."""
+    async def post(url, key, body, headers=None):
+        bodies.append(json.dumps(body))
+        answers = {}
+        for qid, q in body["questions"].items():
+            if q["type"] == "noul":
+                answers[qid] = {"noul": 0.1 if qid == "not_achieved" else 0.9}
+                continue
+            pick = picks[qid].pop(0) if isinstance(picks[qid], list) else picks[qid]
+            answers[qid] = {"choice": pick, "confidence": 1.0,
+                            "probabilities": {i: float(i == pick) for i in q["criteria"]}}
+        return {"answers": answers}
+    return post
+
+
+class FakeLoginSession(FakeRunSession):
+    async def observe(self, page, after=None):
+        self.observed += 1
+        return {**LOGIN, "marker": f"m{self.observed}"}
+
+    async def settled_markdown(self, page):
+        return "Welcome back, student"
+
+
+def test_secret_is_typed_locally_and_never_reaches_a_model_or_the_result(monkeypatch):
+    from cloak_agent import agent
+    bodies, s = [], FakeLoginSession()
+    monkeypatch.setattr(model, "post_json", fake_jev(bodies, {
+        "operation": ["TYPE_TEXT", "DONE"], "type_text_target": "1", "secret": "password"}))
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+
+    async def no_text_model(*_):
+        raise AssertionError("a secret field must not go to the text model")
+    monkeypatch.setattr(agent, "field_text", no_text_model)
+    secrets = {"username": "student", "password": "Pa55word!"}
+    r = asyncio.run(agent.run(s, "log in", page=FakePage(), secrets=secrets))
+    assert s.acted == [("Logged in as student", "Password", "Pa55word!")] and r["status"] == "done"
+    assert r["trace"][0]["text"] == "[secret:password]"
+    for leak in secrets.values():
+        assert not any(leak in b for b in bodies) and leak not in json.dumps(r)
+    assert any('"secrets_available": ["username", "password"]' in b for b in bodies)
+    # the 2nd choose and the DONE check carry history whose url holds the username: redacted too
+    assert sum('"recent_actions": [{' in b for b in bodies) >= 2
+
+
+def test_done_check_failure_keeps_the_finished_task(monkeypatch):
+    r = run_fake(monkeypatch, FakeRunSession(), lambda state, h: decision("DONE", "DONE") if h else decision("Submit"),
+                 verified="raise")
+    assert r["status"] == "done_unverified" and "503" in r["detail"] and len(r["trace"]) == 1
+
+
+def test_loop_brake_lets_scrolling_continue_when_the_text_stays_the_same(monkeypatch):
+    s = FakeRunSession(["same text"])  # image/canvas page: text constant, scroll position moves
+    r = run_fake(monkeypatch, s, lambda state, h: decision("DONE", "DONE") if len(h) == 4
+                 else decision("Scroll down", kind="scroll"))
+    assert len(s.acted) == 4 and r["status"] == "done"
+
+
+def test_snapshot_and_act_replies_hide_the_tabs_secrets(monkeypatch):
+    from cloak_agent import agent, mcp_server
+    tab = mcp_server.Tab(page=None, view={**LOGIN, "marker": "m"}, secrets={"username": "student"})
+    out = asyncio.run(mcp_server._reply(None, "t1", tab, ["did: TYPE_TEXT 'Email' = 'student'"], False))
+    assert "student" not in out and "[secret:username]" in out
+    seen = []
+
+    async def choose(state, goal, history, **_):
+        seen.append(json.dumps(state))
+        return decision("DONE", "DONE")
+    monkeypatch.setattr(agent, "choose", choose)
+    asyncio.run(agent.step(FakeLoginSession(), None, instruction="click Continue", secrets={"username": "student"}))
+    assert seen and "student" not in seen[0]
+
+
+def test_secret_field_without_secrets_needs_input(monkeypatch):
+    from cloak_agent import agent
+    monkeypatch.setattr(model, "post_json", fake_jev([], {"operation": "TYPE_TEXT", "type_text_target": "1"}))
+    monkeypatch.setenv("TYPESAFE_API_KEY", "k")
+
+    async def no_text_model(*_):
+        raise AssertionError("the text model must never invent a password")
+    monkeypatch.setattr(agent, "field_text", no_text_model)
+    r = asyncio.run(agent.run(FakeLoginSession(), "log in", page=FakePage()))
+    assert r["status"] == "needs_input" and "Password" in r["detail"]
 
 
 def test_mcp_browser_use_rejects_unknown_and_busy_tabs_and_releases_activity():

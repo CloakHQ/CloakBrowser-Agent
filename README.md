@@ -133,19 +133,22 @@ claude mcp add cloak-agent --scope user \
 
 ### Tools
 
-**`browse(goal, url?, tab_id?)`** runs one whole task and returns:
-- `status`: `done`, `blocked` (no control can make progress), `needs_input` (the goal lacks a value a field needs), `budget` (step limit reached), or `error`
+**`browse(goal, url?, tab_id?, secrets?)`** runs one whole task and returns:
+- `status`: `done`, `done_unverified` (the agent stopped as done, but a second check of the page disagreed: look before trusting it), `blocked` (no control can make progress, or the same action came up on the same page a 3rd time), `needs_input` (the goal lacks a value a field needs), `budget` (step limit reached), or `error`
 - `tab_id` (the tab stays open), the final URL and title, and the number of actions, decisions and milliseconds
-- **every step taken:** what was clicked or typed, Jev's probability `p` for it, and the top runner-ups in brackets. A low `p`, or a runner-up close behind, shows where the agent was unsure.
+- **every step taken:** what was clicked or typed, Jev's probability `p` for it, the top runner-ups in brackets, and `op=`: its probability for the operation itself, with the runner-up operation (`op=CLICK 0.43 (SCROLL_DOWN 0.35)`). A low `p` or `op`, or a runner-up close behind, shows where the agent was unsure. In our tests, wrong clicks showed up in a low `op` more than in `p`.
+- **done check** (on `done`): the straight and negated "is the goal achieved?" probabilities
 - **stale retries**, if any: steps re-decided because the page changed before acting, with what changed
 - the relevant page content as markdown, fenced as `<untrusted_page_content>`
 
 While a call runs, each step is also sent as a live **progress notification** (clients that show MCP progress display it).
 
+**Logins without exposing the password:** pass `secrets={"username": "env:SHOP_USER", "password": "env:SHOP_PW"}` and set those variables in the MCP server's `env`. Only `env:NAME` references are accepted, so the values never pass through the calling model. Jev sees only the names and picks which one fits each field. The value is typed locally and appears everywhere (steps, page content, every model request) as `[secret:name]`. A password field with no matching secret ends as `needs_input`. The text model never writes a password.
+
 **`snapshot(tab_id, screenshot?)`** shows a tab exactly as the agent sees it: URL, title, scroll position, the operations on offer, the numbered element table (`[3] button "Reject all"`) and the visible text. With `screenshot=True` it also returns an image of the visible part of the page. Use it to see why a task stopped.
 
 **`act(tab_id, op?, target?, instruction?, text?, screenshot?)`** does one step in a tab yourself, for example to get past a page the agent is stuck on. Give either:
-- `op` + `target` from the latest snapshot: `CLICK "3"`, `TYPE_TEXT "5"` with `text`, `SELECT "4:2"`, or `SCROLL_DOWN` / `SCROLL_UP` / `WAIT`. No model is involved: `text` is typed exactly as given. Password fields are not offered.
+- `op` + `target` from the latest snapshot: `CLICK "3"`, `TYPE_TEXT "5"` with `text`, `SELECT "4:2"`, or `SCROLL_DOWN` / `SCROLL_UP` / `WAIT`. No model is involved: `text` is typed exactly as given. Password fields show a masked value. To fill one without the value passing through you, use `browse` with `secrets`.
 - `instruction`, one step in plain language (`"click Reject all"`). Jev picks the element; the reply shows its `p` and runner-ups.
 
 `act` returns what it did, whether the page changed, and the new snapshot, so steps can be chained. If the page changed since the snapshot, nothing is done and it answers `status: stale`. A tab serves one call at a time; a second call on it answers `busy`. Continue the task with `browse(goal, tab_id=...)` whenever you like.
@@ -242,6 +245,7 @@ async def main():
     session = await Session.launch(headless=False)        # or: await Session.connect("http://127.0.0.1:9222")
     page = await session.new_tab("https://en.wikipedia.org")
     result = await run(session, "Open the Wikipedia article about Gödel's incompleteness theorems.", page=page)
+    # login: run(session, "Log in", page=page, secrets={"username": "...", "password": "..."})
     print(result["status"], result["url"])
     print(result["markdown"])
     await session.close()
@@ -265,8 +269,8 @@ Jev decisions take ~0.3 s each, roughly 1 s per task. Filling a field with the t
 - Frames, closed shadow roots, canvas apps, file uploads, links that open new tabs, and CAPTCHAs aren't handled.
 - Native `<select>` values are set programmatically, not through a mouse-driven dropdown.
 - Autocomplete: after typing, it may pick a close suggestion instead of submitting the exact text.
-- Password fields are never read or offered to the model.
-- A valid action can still be the wrong one, and `done` means the model saw the goal as met. Check results that matter.
+- A password field's value is never read: the model sees it only as filled or empty, and fills it only from `secrets`.
+- A valid action can still be the wrong one, and `done` means the model saw the goal as met and a second check agreed. Check results that matter.
 
 ## Security
 

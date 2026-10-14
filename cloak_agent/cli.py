@@ -5,13 +5,14 @@ import argparse
 import asyncio
 import json
 
-from .agent import run
+from .agent import op_text, run
 from .browser import DEFAULT_PROFILE, Session
 
 
 def print_step(step):
     text = f" ← {step['text']!r}" if step["text"] else ""
-    print(f"[{step['at_ms']:>6} ms] {step['kind']:6} {step['action'][:70]}{text}  (p={step['probability']})", flush=True)
+    print(f"[{step['at_ms']:>6} ms] {step['kind']:6} {step['action'][:70]}{text}  (p={step['probability']}"
+          f"{op_text(step)})", flush=True)
 
 
 async def serve_browser(args):

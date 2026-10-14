@@ -149,13 +149,17 @@ def _index_order(index):
     return tuple(int(part) for part in index.split(":"))
 
 
-async def choose(page, goal, history):
+async def choose(page, goal, history, secrets=None):
+    """`secrets`: names only (values never reach a model)."""
     view, targets, controls = page_view(page, history)
     labels = {
         "CLICK": "Click an element, button, menu option, autocomplete suggestion, or calendar day.",
         "TYPE_TEXT": "Enter or replace text in an editable field. A small LLM will supply the value from the goal.",
         "SELECT": "Select an observed dropdown value.",
     }
+    if secrets:
+        view["secrets_available"] = list(secrets)
+        labels["TYPE_TEXT"] += " Fields matching `secrets_available` (e.g. a password) get the caller's secret."
     operations = {key: labels[key] for key in targets}
     operations.update({key: value["label"] for key, value in controls.items()})
     operations.update(
@@ -208,6 +212,63 @@ async def choose(page, goal, history):
         "usage": result.get("usage", {}),
         "latency_ms": round((time.perf_counter() - started) * 1000),
     }
+
+
+def redact(obj, secrets):
+    """Replace every secret value with [secret:name] in str/list/tuple/dict. No secrets → obj unchanged."""
+    if not secrets:
+        return obj
+    if isinstance(obj, str):
+        for name, value in sorted(secrets.items(), key=lambda kv: -len(kv[1])):  # longest first: no partial leaks
+            if value:
+                obj = obj.replace(value, f"[secret:{name}]")
+        return obj
+    if isinstance(obj, dict):
+        return {k: redact(v, secrets) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(redact(v, secrets) for v in obj)
+    return obj
+
+
+async def secret_for(action, names, goal):
+    """Which caller-provided secret is this field's value? Jev sees only the names, never a value.
+    Returns a name, or None when none fits (p < 0.5 or `none`)."""
+    criteria = {name: f"The caller's secret named '{name}'" for name in names}
+    criteria["none"] = "None of these secrets; the value comes from the goal."
+    body = {
+        "model": os.environ.get("TYPESAFE_MODEL", "jev-latest"),
+        "state": {"goal": goal, "field": {k: action.get(k) for k in ("label", "role", "secret")}},
+        "questions": {"secret": {"type": "choice", "criteria": criteria,
+                                 "instructions": "Which caller-provided secret is the value to type into `field`?"}},
+    }
+    started = time.perf_counter()
+    result = await post_json(TYPESAFE_URL, os.environ["TYPESAFE_API_KEY"], body)
+    answer = validate_choice(result["answers"].get("secret", {}), criteria)
+    choice = answer["choice"]
+    name = choice if choice != "none" and answer["probabilities"][choice] >= 0.5 else None
+    return name, round((time.perf_counter() - started) * 1000)
+
+
+DONE_QUESTIONS = {
+    "achieved": "Does the page show that every part of `goal` is achieved?",
+    "not_achieved": "Does the page show that some part of `goal` is NOT achieved yet?",
+}
+
+
+async def verify_done(page, goal, history):
+    """Second opinion on a DONE pick: the same page asked straight and negated, in one request.
+    Verified only if both agree the goal is achieved (idea from s1pilot's negated AI check)."""
+    view, _, _ = page_view(page, history)
+    body = {
+        "model": os.environ.get("TYPESAFE_MODEL", "jev-latest"),
+        "state": {"goal": goal, **view},
+        "questions": {k: {"type": "noul", "instructions": q} for k, q in DONE_QUESTIONS.items()},
+    }
+    started = time.perf_counter()
+    result = await post_json(TYPESAFE_URL, os.environ["TYPESAFE_API_KEY"], body)
+    p, p_not = (result["answers"][k]["noul"] for k in DONE_QUESTIONS)
+    return {"achieved": round(p, 3), "not_achieved": round(p_not, 3), "verified": p >= 0.5 and p_not < 0.5,
+            "latency_ms": round((time.perf_counter() - started) * 1000)}
 
 
 def field_context(goal, action, page, history):
