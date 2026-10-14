@@ -4,6 +4,11 @@ All notable changes to cloakbrowser-agent are documented here.
 
 ---
 
+## [0.1.5] — 2026-10-14
+
+- Requires cloakbrowser 0.6.3 or newer (`cloakbrowser[geoip]>=0.6.3,<0.7`). Humanized typing, mouse moves and scrolling follow its new human timing: keys held and overlapping like a real typist, mouse moves that take longer the farther they go, and scrolling in whole mouse-wheel notches.
+- A country missing from cloakbrowser's GeoIP locale map no longer fails the launch (falls back to `en-US`).
+
 ## [0.1.4] — 2026-10-09
 
 - Works with cloakbrowser 0.6 and its new humanize engine. The dependency is now `cloakbrowser[geoip]>=0.6.0,<0.7` (was `==0.5.11`). Mouse movement, clicks, typing and scrolling stay humanized.

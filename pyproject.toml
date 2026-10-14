@@ -1,6 +1,6 @@
 [project]
 name = "cloakbrowser-agent"
-version = "0.1.4"
+version = "0.1.5"
 description = "Jev-powered stealth browser agent: TypeSafe Jev decides each step, CloakBrowser carries it out. MCP server, CLI and Python API."
 readme = "README.md"
 keywords = ["jev", "typesafe", "system-one", "browser-agent", "ai-agent", "web-agent", "mcp", "mcp-server",
@@ -8,7 +8,7 @@ keywords = ["jev", "typesafe", "system-one", "browser-agent", "ai-agent", "web-a
 license = "MIT"
 requires-python = ">=3.10"
 # Capped at the minor: uses cloakbrowser humanize internals (see cloak_agent/browser.py docstring).
-dependencies = ["cloakbrowser[geoip]>=0.6.0,<0.7", "httpx>=0.27,<1", "mcp>=2.2,<3"]
+dependencies = ["cloakbrowser[geoip]>=0.6.3,<0.7", "httpx>=0.27,<1", "mcp>=2.2,<3"]
 
 [project.scripts]
 cloak-agent = "cloak_agent.cli:main"
