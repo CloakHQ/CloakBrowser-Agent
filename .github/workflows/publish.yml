@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
       - name: Tests and lint (offline, no browser, no paid API calls)
@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
       - name: Check tag matches pyproject version
@@ -50,7 +50,7 @@ jobs:
       id-token: write  # OIDC trusted publishing — no PYPI_TOKEN needed
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
       - name: Build
@@ -60,4 +60,4 @@ jobs:
       - name: Publish to PyPI
         # Keep SHA: the publisher derives its Docker image tag from github.action_ref.
         # Refresh the lockfile with gh actions-lock --no-narrow to preserve this ref.
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086  # v1.14.3
